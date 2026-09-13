@@ -3116,3 +3116,15 @@ kapılı — ilk biçimi kullanılmayan import yüzünden tip hatası verdi, ge�
 sayılıp tip-geçerli biçimle tekrarlandı). Hepsi kırmızı. Açık/koyu × 1280/375'te
 taşma yok.
 Geri dönüş maliyeti: düşük (opsiyonel alan; `reason` metni daraldı — sürüm notunda)
+
+## 2026-09-13 — 0.4.4 yayımlandı; eylem v1.3.4
+
+Kullanıcının talimatıyla (PR #10 birleşti): yayın koşumu `34754297580`,
+`6e491ed` üzerinde. Dört paket registry'den okundu — `latest=0.4.4`,
+`_npmVersion` 12.0.2 (OIDC, token değil), dördünde de SLSA provenance —
+ve `npx @ktlsr/assay@0.4.4 --version` temiz bir dizinde 0.4.4 bastı.
+`action-v1.3.4` (açıklamalı) `6e491ed`'de açıldı ve GitHub Release "Latest";
+`v1` açık onayla `a63120c`'den `6e491ed`'ye zorla taşındı. `v1`'deki
+`action.yml` pini API'den okundu: 0.4.4. İçerik yalnızca `compare`
+gerekçesinin daralması (davranış değişikliği metinde; çıkış kodları aynı).
+Dış depo doğrulaması yapılmadı (istenmedi).

@@ -8,12 +8,15 @@ Kararların tam listesi [decisions.md](decisions.md), engeller
 ## Durum
 
 **Faz 0–3 tamam** · **kalibrasyon tamam** ·
-**npm'de 0.4.3** · **eylem v1.3.3** (`v1` → `a63120c`, pin 0.4.3)
+**npm'de 0.4.4** · **eylem v1.3.4** (`v1` → `6e491ed`, pin 0.4.4)
 
-**Yayımlanmamış değişiklik var:** `.changeset/compare-blocking-reason.md`
-(core `compare` gerekçesi daraldı, `RunComparison.note`, CLI `also:` satırı) —
-0.4.4 olarak yayımlanmayı bekliyor, tetik kullanıcıda. Web tarafı zaten
-production'da.
+**0.4.4 yayımlandı (2026-09-13):** core `compare` gerekçesi yalnızca durduran
+sebebi söylüyor, `RunComparison.note`, CLI `also:` satırı. Yayın koşumu
+`34754297580`, birleştirme `6e491ed` (PR #10); dört paket registry'de
+(`latest=0.4.4`, npm 12.0.2/OIDC, provenance), `npx @ktlsr/assay@0.4.4
+--version` temiz dizinde 0.4.4. Eylem: `v1` ve `action-v1.3.4` → `6e491ed`,
+GitHub Release "Latest", `v1`'deki `action.yml` pini 0.4.4. Dış depo koşumu
+yapılmadı (istenmedi).
 
 Son güncelleme: 2026-09-11 akşam (oturum kapanışı). assayctl.dev'de public: animate, better-typography,
 ui-ux-pro-max, impeccable (3 koşum), hallmark, frontend-design,
@@ -41,7 +44,7 @@ tutarlı (yerelde 11/11, production'da 4/4 — frontend-design'ın iki bağlant�
 koşumu atlayan "vs <tarih>" durumunun gerçek verisi henüz yok; yalnızca birim
 testiyle sınanıyor.
 
-Açık kalan: `4e6269f`'nin core/CLI kısmı npm'e çıkmadı (changeset hazır).
+`4e6269f`'nin core/CLI kısmı 0.4.4 ile npm'e çıktı (2026-09-13).
 
 ## Oturum kaydı — 2026-09-10
 
@@ -261,11 +264,8 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 Sıra ve onay durumu (2026-09-11 akşam):
 
-0. **0.4.4 yayını** — changeset `compare-blocking-reason.md` hazır (core
-   gerekçesi daraldı, davranış değişikliği yalnızca metin). Yol her zamanki:
-   sürüm PR'ı birleşir → `gh workflow run release.yml -f confirm=yayimla` →
-   registry'den doğrula → istenirse `v1` taşı + `action-v1.3.4` (etiket taşımak
-   açık onay ister). **Tetik kullanıcıda.**
+0. ~~0.4.4 yayını~~ — **tamam (2026-09-13).** Registry'den doğrulandı;
+   `v1` ve `action-v1.3.4` → `6e491ed` (kullanıcının açık onayıyla).
 
 1. ~~Kazananlı suite'le gerçek çakışma koşumu~~ — **tamam (2026-09-11).**
    0.4.3 ile 912ad216: 20/20 vaka, 60 deneme, $3.04; kayıt ve suite ölçüm
