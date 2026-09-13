@@ -1,6 +1,6 @@
 # Temiz koşum ortamı — plan
 
-Durum: **tasarım, uygulanmadı** (2026-09-13). Onay bekleyen kararlar en altta.
+Durum: **tasarım; K0 tamam** (2026-09-13). Kararlar ve K0 sonuçları en altta.
 
 ## Amaç ve kapsam
 
@@ -296,15 +296,92 @@ dizüstünde, ~1.5 gün. CLAUDE.md, TEMP ve Windows arızalarını hemen kapatı
 ve runner'ın öldürülmesi kalır, token dizüstünde kalır. Önerilmiyor ama reddedilmedi:
 acil bir ölçüm varsa ara adım olarak işe yarar.
 
-## Açık kararlar (kullanıcının)
+## K0 sonuçları (2026-09-13)
 
-1. **API anahtarı mı, OAuth mu** — öneri API anahtarı, ayrı workspace, harcama tavanı.
-2. **Sunucu** — sağlayıcı ve boyut; öneri 4 vCPU / 8 GB, production'dan ayrı.
-3. **Konteynerde `bypassPermissions`** — konteyner sınır olunca izin modu artık
-   sandbox'ın tek duvarı değil; kabuk isteyen skill'ler allowlist'siz ölçülebilir
-   (0.2.0-c'nin alternatifi). Ama mod ortam hash'inde: varsayılanı değiştirmek bütün
-   taban çizgilerini kaydırır. Öneri: varsayılan `acceptEdits` kalsın, suite başına
-   bilinçli seçim.
-4. **Gerçek pin 3** (6'daki fırsat) — ayrı bir adım olarak roadmap'e mi alınsın.
-5. **Mevcut taban çizgileri** — sunucuda hangi suite'ler yeniden kurulsun (her biri
-   bir koşum parası).
+Düzenek ve ham sayılar `tools/k0/`de (Dockerfile, sahte sunucular, kapasite
+betiği, çözümleyici, `capacity-summary.json`, `capacity-samples.csv`).
+Yerelde Docker Desktop (28.4.0; VM 24 CPU, 31 GB).
+
+### Varsayımlar — ücretsiz, model çağrısı yok
+
+Sahte bir Anthropic API (gerçek biçimde SSE dönen), bir kimlik proxy'si ve
+bir çıkış günlükçüsü, dışarıya kapalı bir iç Docker ağında.
+
+| Soru | Sonuç |
+|---|---|
+| İmajda talimat dosyası var mı | **Yok.** `find /` CLAUDE.md, CLAUDE.local.md, `.claude/` bulmadı; `/etc/claude-code` yok. HOME'da yalnızca kabuk dosyaları |
+| Kök olmayan kullanıcı (uid 1000) | `acceptEdits` ve `bypassPermissions` ikisi de oturumu tamamladı |
+| Kimlik proxy'si | Konteyner sahte anahtarla konuştu; upstream **yalnızca gerçek anahtarı** gördü; konteynerin ortamında gerçek anahtar yok |
+| SSE proxy'den geçiyor mu | Evet — 6 parça, 300 ms'ye yayılmış (tamponlanmadı); dört varyasyonun dördü `result: ok` |
+| Claude Code'un API dışı adresleri | Varsayılanda `api.anthropic.com:443`'e **5** CONNECT (zorunlu olmayan trafik). `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` ile **0**; model çağrısı base URL'ye gidiyor |
+| 0.4.5'in ölçümü konteynerde | Yayımlanmış 0.4.5 kaydı `environment.memory: []` (ölçüldü, temiz) ile yazdı |
+
+Tavan: çıkış günlükçüsü yalnızca `HTTPS_PROXY`'ye uyan trafiği görüyor. Uymayan
+bir bağlantı iç ağda zaten dışarı çıkamıyor; oturumların dördü de tamamlandığı
+için zorunlu bir çağrı bu yoldan gitmiyor.
+
+### Tasarıma iki düzeltme
+
+1. **Çıkış yalnızca Anthropic değil.** impeccable'ın ağır vakasında ajan
+   `npm install`, vite ve Playwright çalıştırıyor (aşağıda). "Yalnız
+   `api.anthropic.com`" diyen bir çıkış kuralı bu vakayı ölçemez hâle getirir;
+   ajanın çıkışı bir izin listesinden (npm registry vb.) geçmeli. Kimlik yine
+   yalnızca proxy'de; değişen, proxy'nin tek çıkış değil **tek kimlikli çıkış**
+   olması.
+2. **Playwright'ın tarayıcısı imajda.** Yoksa ajanın her `npx playwright`'ı ~150 MB
+   indirir; imaj Chromium'la 0.67 GB.
+
+### Kapasite — gerçek koşum
+
+impeccable'dan iki vaka (en ağır tetiklenme vakası `hero_direction` +
+negatif `slow_query`), `bypassPermissions` (en kötü durum), 1, 2 ve 4 paralel
+konteyner, her konteynerde bir ağır + bir hafif deneme; `docker stats` ~2 sn'de
+bir. **14 denemenin 14'ü geçti, hepsi `environment.memory: []`.** Abonelik
+token'ıyla, nominal **$1.47** (K0'a özgü: token `--env-file` ile konteynere
+verildi, proxy'siz — tasarımın hedefi değil). Kayıtlar yüklenmedi.
+
+| P | Duvar | Toplam CPU zirve / p95 / medyan | Toplam bellek zirve |
+|---|---|---|---|
+| 1 | 170 sn | 1,19 / 0,71 / 0,03 çekirdek | 684 MiB |
+| 2 | 317 sn | 1,37 / 0,52 / 0,04 çekirdek | 998 MiB |
+| 4 | 128 sn | 1,11 / 1,02 / 0,10 çekirdek | 1.314 MiB |
+
+Ağır denemenin kendisi iki ayrı şey olabiliyor:
+
+| Ajan ne yaptı | Deneme | Bellek zirve | CPU zirve | Disk (yazılabilir katman) | Süreç | Süre | Maliyet |
+|---|---|---|---|---|---|---|---|
+| Neredeyse hiçbir şey (1 Bash) | p2-0, p4-3 | 212–225 MiB | 0,05 | 2–3 MB | 41–43 | 53–88 sn | $0.07–0.13 |
+| `npm install` + vite + Playwright | p1-0, p4-0/1/2 | 433–684 MiB | 0,75–1,19 | 120–919 MB | 68–107 | 92–161 sn | $0.13–0.18 |
+| Aynısı, uzun (54 Bash, 22 Playwright) | p2-1 | **998 MiB** | **1,37** | **938 MB** | **212** | 306 sn | $0.47 |
+
+Okuma:
+- **Model bekleniyor, makine değil.** Medyan CPU konteyner başına ~%3–10; süreyi
+  API belirliyor. P=4'ün duvar saati P=1'inkinden kısa (denemeler daha hafif çıktı).
+- **Konteyner başına tavan ≈ 1 GB bellek, ~1,4 çekirdek kısa patlama, ~1 GB geçici
+  disk, ~200 süreç.** Geçici disk konteynerle birlikte siliniyor.
+- **4 paralel en kötü durum (hepsi p2-1 gibi): ~4 GB bellek, patlamada ~5–6 çekirdek,
+  ~4 GB geçici disk.** Gözlenen gerçek P=4: 1,3 GB, ~1,1 çekirdek.
+- **Bu makinede ihtiyaç VM'in %5'inin altında** (31 GB'ın ~1,3'ü, 24 çekirdeğin ~1'i).
+
+Tavan: 7 ağır deneme küçük bir örnek ve varyans büyük (53–306 sn, $0.07–0.47).
+Örnekleme ~2 sn; daha kısa patlamalar kaçmış olabilir. CPU hızlı bir masaüstünde
+ölçüldü; daha yavaş bir VPS'te patlamalar uzar, düşmez.
+
+### Sunucu kararı için sayılar
+
+| Seçenek | Karşılıyor mu |
+|---|---|
+| Bu makine, yerelde | Fazlasıyla: en kötü P=4 bile VM'in küçük bir kısmı. Kalan tek eksik, token'ın dizüstünde durması (bugünkü gibi) |
+| 2 vCPU / 4 GB VPS | P=2 rahat; P=4 tipik yükte olur, en kötü durumda sınırda |
+| 4 vCPU / 8 GB VPS | P=4 en kötü durumda da payla |
+| Disk | İmaj ~2 GB (sanal), deneme başına ≤1 GB geçici, kayıtlar MB'larca: 20 GB yeter |
+
+## Kararlar (2026-09-13)
+
+1. **Kimlik: API anahtarı**, ayrı bir Console workspace'inde, harcama tavanıyla.
+2. **Sunucu: ertelendi.** K0'ın kapasite sayılarına göre karar verilecek; ihtiyaç
+   makul değilse yerelde devam edilir ve sunucu alınmaz. Sayılar yukarıda.
+3. **İzin modu: `acceptEdits` varsayılan kalıyor**, suite başına bilinçli seçim.
+4. **Gerçek pin 3 roadmap'te, K5'ten sonra** (K7).
+5. **Yeniden kurulacak taban çizgileri: marketingskills v3 ve impeccable 4.2.2.**
+   Diğerleri kapandı.

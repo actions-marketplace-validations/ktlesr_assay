@@ -3235,3 +3235,27 @@ production'ın kaçışı yapar. Mimari mevcut koda oturuyor: 0.3.0-c'nin worker
 Ayrıntı, maliyet, riskler, sıra: `docs/runner-environment.md`. Kararlar kullanıcının
 onayına kadar öneri.
 Geri dönüş maliyeti: düşük (yalnız plan)
+
+## 2026-09-13 — Koşum ortamı kararları ve K0 ölçümü
+
+Kullanıcı kararları: kimlik API anahtarı (ayrı Console workspace'i, harcama tavanı);
+sunucu ertelendi — K0'da kapasite yerelde ölçülecek, ihtiyaç makul değilse yerelde
+devam; izin modu `acceptEdits` varsayılan, suite başına bilinçli seçim; gerçek pin 3
+roadmap'te K5'ten sonra; sunucuda yeniden kurulacak taban çizgileri marketingskills v3
+ve impeccable 4.2.2.
+K0 (ayrıntı `docs/runner-environment.md`, düzenek `tools/k0/`):
+- Varsayımlar ücretsiz ölçüldü (sahte SSE API + kimlik proxy'si + çıkış günlükçüsü,
+  iç ağ): imajda talimat dosyası yok; uid 1000 iki izin modunda çalışıyor; proxy
+  anahtarı enjekte ediyor ve konteyner gerçek anahtarı görmüyor; SSE tamponlanmadan
+  geçiyor; `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` ile API dışı dış bağlantı yok
+  (varsayılanda 5); 0.4.5'in ölçümü konteynerde `[]`.
+- Kapasite gerçek koşumla (abonelik token'ı, $1.47 nominal, 14 deneme, hepsi geçti):
+  konteyner başına ≤~1 GB bellek, ~1,4 çekirdek patlama, ≤~1 GB geçici disk, ~200 süreç;
+  süreyi model belirliyor (medyan CPU %3–10). 4 paralel en kötü durum ~4 GB, patlamada
+  ~5–6 çekirdek.
+- Tasarım düzeltmeleri: ajanın çıkışı yalnız Anthropic olamaz (npm, Playwright) —
+  proxy tek kimlikli çıkış, ajan çıkışı izin listesinden; tarayıcı imajda.
+- Kapasite koşumunda token proxy'siz, `--env-file` ile verildi: K0'a özgü bir kestirme,
+  tasarımın hedefi değil. Kayıtlar yüklenmedi.
+- Yan bulgu: `resolveFixtures` yalın dosya adıyla verilen suite'te fixture'ı bulamıyor
+  (roadmap'e yazıldı, düzeltilmedi).

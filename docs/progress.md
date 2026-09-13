@@ -278,10 +278,10 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 Sıra ve onay durumu (2026-09-13):
 
-0a. **Temiz koşum ortamı — plan hazır, onay bekliyor** (2026-09-13):
-    [runner-environment.md](runner-environment.md), roadmap "Temiz koşum
-    ortamı" (K0–K6). Kod yazılmadı. Açık kararlar planın sonunda; K0 ücretsiz ve
-    ilk adım.
+0a. **Temiz koşum ortamı — K0 tamam, sunucu kararı kullanıcıda** (2026-09-13):
+    [runner-environment.md](runner-environment.md) "K0 sonuçları". Varsayımların
+    hepsi tuttu; kapasite: konteyner başına ≤~1 GB, 4 paralel en kötü ~4 GB. Karar:
+    sunucu mu, yerelde devam mı. Sonraki adım K1 (deneme imajı) — ikisinde de aynı.
 00. ~~0.4.5 yayını ve maruz kayıtlar~~ — **tamam (2026-09-13)**: yayımlandı,
     `v1` taşındı; maruz kayıtlara künye notu düşüldü, yeniden ölçülmedi.
 

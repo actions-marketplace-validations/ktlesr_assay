@@ -752,13 +752,25 @@ Makinenin ölçüme karıştığı yerlerin hepsini kapatıyor: CLAUDE.md, `%TEM
 
 | Adım | Çıktı | İş | Durum |
 |---|---|---|---|
-| K0 Varsayımları ölç | Claude Code'un dış adresleri, proxy'den SSE, kök olmayan kullanıcı, imajda talimat yok — ücretsiz | S | bekliyor |
+| K0 Varsayımları ölç | Claude Code'un dış adresleri, proxy'den SSE, kök olmayan kullanıcı, imajda talimat yok; kapasite (1/2/4 paralel) | S | **tamam** — varsayımların hepsi tuttu; iki tasarım düzeltmesi (ajan çıkışı izin listesi, tarayıcı imajda); konteyner başına ≤1 GB bellek, ~1,4 çekirdek patlama, ≤1 GB geçici disk (`runner-environment.md`, K0 sonuçları) |
 | K1 Deneme imajı | Pinli Claude Code, uid 1000, boş HOME, talimat denetimi | M | bekliyor |
 | K2 Konteyner worker'ı | `superviseAttempt` konteynerde; kayda `platform` + imaj özeti | M–L | bekliyor |
 | K3 Kimlik proxy'si | Anahtar enjeksiyonu, tek upstream, koşum başına sayaç/tavan | M | bekliyor |
-| K4 Sunucu | Ayrı VPS, sırlar, kalıcı disk | S | bekliyor — sağlayıcı/boyut kullanıcıda |
+| K4 Sunucu | Ayrı VPS, sırlar, kalıcı disk | S | **ertelendi** — K0 sayılarına göre kullanıcı karar verecek; makul değilse yerelde devam |
 | K5 Tetik ve doğrulama | `assay-remote`; bilinen bir suite'i sunucuda koşup karşılaştırmak | S–M | bekliyor — ~$5–10, onay |
 | K6 Belgeler | sandbox-security A1/A2/A3 yeniden | S | bekliyor |
+| K7 Gerçek pin 3 | Proxy'nin gördüğü sistem isteminden `systemPromptHash`; `--exclude-dynamic-system-prompt-sections` kendisi bir koşul | M | bekliyor — K5'ten sonra (kullanıcı kararı) |
+
+Kararlar (2026-09-13): kimlik API anahtarı (ayrı workspace, tavan); izin modu
+`acceptEdits` varsayılan; sunucuda yeniden kurulacak taban çizgileri marketingskills
+v3 ve impeccable 4.2.2.
+
+**K0'da bulunan runner kusuru.** `resolveFixtures` suite'in dizinini "son `/`'den
+öncesi" diye alıyor; suite yalnızca dosya adıyla verilince (`assay run x.suite.yaml`)
+ayraç yok ve dosya adının kendisi dizin sayılıyor: fixture yolu
+`x.suite.yaml/../fixtures/…` olup bulunamıyor, deneme `unknown`. Ölçüm deposundaki
+koşumlar `suites/x.suite.yaml` biçiminde verildiği için görülmedi. Düzeltilmedi
+(K0 ölçüm); küçük bir yama adayı.
 
 ~5–6 gün kod, ~$5–10 doğrulama, ayda ~€7–17 sunucu; ölçüm başına API maliyeti
 deneme başına ~$0.05 (tetiklenme) – ~$0.09 (tamamlama). Açık kararlar planın
