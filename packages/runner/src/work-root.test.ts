@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, relative, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createWorkspace, destroyWorkspace, workRoots } from './sandbox.js'
 
@@ -11,16 +11,16 @@ import { createWorkspace, destroyWorkspace, workRoots } from './sandbox.js'
  * `~/.claude/CLAUDE.md`'si her denemeye giriyordu.
  */
 
-const under = (path: string, root: string) => {
-  const rel = relative(root, path)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+const under = (path: string, root: string, p = { relative, isAbsolute }) => {
+  const rel = p.relative(root, path)
+  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel))
 }
 
 describe('workRoots', () => {
   it('Windows: gecici dizin ev altindaysa surucu kokunde bir kok secer', () => {
     const roots = workRoots('C:\\Users\\ada\\AppData\\Local\\Temp', 'C:\\Users\\ada', undefined, 'win32')
     expect(roots[0]).toMatch(/^[A-Za-z]:[\\/]assay-work$/)
-    expect(under(roots[0] as string, 'C:\\Users\\ada')).toBe(false)
+    expect(under(roots[0] as string, 'C:\\Users\\ada', win32)).toBe(false)
   })
 
   it('POSIX: gecici dizin ev altindaysa /tmp', () => {
@@ -32,7 +32,7 @@ describe('workRoots', () => {
   })
 
   it('ASSAY_WORK_ROOT verildiyse o', () => {
-    expect(workRoots('/home/ada/.tmp', '/home/ada', '/data/assay', 'linux')).toEqual([resolve('/data/assay')])
+    expect(workRoots('/home/ada/.tmp', '/home/ada', '/data/assay', 'linux')).toEqual(['/data/assay'])
   })
 })
 

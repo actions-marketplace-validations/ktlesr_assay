@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
 import type { CapturedFile, EnvDiff, NetworkRequest, TraceEvent } from '@ktlsr/assay-core'
 
 /** Yol → içerik hash'i. Anlık görüntü. */
@@ -52,16 +52,17 @@ export function workRoots(
   override: string | undefined = process.env['ASSAY_WORK_ROOT'],
   platform: NodeJS.Platform = process.platform,
 ): readonly string[] {
-  if (override !== undefined && override.trim() !== '') return [resolve(override)]
-  if (!inside(resolve(tmp), resolve(home))) return [tmp]
-  const outside = platform === 'win32' ? join(parse(resolve(tmp)).root, 'assay-work') : '/tmp'
-  return inside(resolve(outside), resolve(home)) ? [tmp] : [outside, tmp]
-}
-
-/** `path` `root`un kendisi ya da altında mı. */
-function inside(path: string, root: string): boolean {
-  const rel = relative(root, path)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+  // Yollar platformun kendi kurallarıyla: Linux'ta `C:\Users\…` göreli bir yol
+  // sayılır ve ev dizini kontrolü sessizce "dışında" derdi (CI yakaladı).
+  const path = platform === 'win32' ? win32 : posix
+  const inside = (child: string, root: string) => {
+    const rel = path.relative(path.resolve(root), path.resolve(child))
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  if (override !== undefined && override.trim() !== '') return [path.resolve(override)]
+  if (!inside(tmp, home)) return [tmp]
+  const outside = platform === 'win32' ? path.join(path.parse(path.resolve(tmp)).root, 'assay-work') : '/tmp'
+  return inside(outside, home) ? [tmp] : [outside, tmp]
 }
 
 /** İlk oluşturulabilen kök. */
