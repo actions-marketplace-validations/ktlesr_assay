@@ -3128,3 +3128,18 @@ ve `npx @ktlsr/assay@0.4.4 --version` temiz bir dizinde 0.4.4 bastı.
 `action.yml` pini API'den okundu: 0.4.4. İçerik yalnızca `compare`
 gerekçesinin daralması (davranış değişikliği metinde; çıkış kodları aynı).
 Dış depo doğrulaması yapılmadı (istenmedi).
+
+## 2026-09-13 — 0.4.4 dışarıdan doğrulandı; v3 tam çakışma koşumu ertelendi
+
+`ktlesr/assay-example`'da `@v1` ile koşum `34754816362`: eylem `ktlesr/assay@v1`'i
+`6e491ed` olarak indirdi, `assay-version: 0.4.4` kurdu ve artefakttaki kayıt
+(`run-2026-09-13T11-35-19-801Z-c65f756d`) `assayVersion: "0.4.4"` taşıyor;
+3 vaka, 6 deneme, `pass`. Log'da "scrub yok" uyarısı yalnızca betiğin kaynağı
+olarak görünüyor; `##[warning]` yok, yani `scrub` gerçekten çalıştı.
+
+Roadmap "Ölçüm-1" (v3 ile tam çakışma koşumu, ~$10) kullanıcı kararıyla
+ertelendi: ifade bağlama deneyinin B kolu bugünkü kurulumun aynısı, deney tam
+modda koşulursa v3 tam matrisi de oradan gelir — aynı ölçüm iki kez
+ödenmez. Sitede o zamana kadar 60 denemelik hızlı koşum (912ad216) duruyor ve
+"fast mode" uyarısını taşıyor; ölçüm deposundaki rapor notu (`633f4b3`) iki
+koşumun farkını söylüyor.

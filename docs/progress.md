@@ -15,8 +15,7 @@ sebebi söylüyor, `RunComparison.note`, CLI `also:` satırı. Yayın koşumu
 `34754297580`, birleştirme `6e491ed` (PR #10); dört paket registry'de
 (`latest=0.4.4`, npm 12.0.2/OIDC, provenance), `npx @ktlsr/assay@0.4.4
 --version` temiz dizinde 0.4.4. Eylem: `v1` ve `action-v1.3.4` → `6e491ed`,
-GitHub Release "Latest", `v1`'deki `action.yml` pini 0.4.4. Dış depo koşumu
-yapılmadı (istenmedi).
+GitHub Release "Latest", `v1`'deki `action.yml` pini 0.4.4. Eylem dış depodan doğrulandı (`ktlesr/assay-example`, koşum `34754816362`: `@v1` → `6e491ed`, `assay-version: 0.4.4`, kayıtta `assayVersion: "0.4.4"`, 3 vaka / 6 deneme `pass`, `scrub` çalıştı).
 
 Son güncelleme: 2026-09-11 akşam (oturum kapanışı). assayctl.dev'de public: animate, better-typography,
 ui-ux-pro-max, impeccable (3 koşum), hallmark, frontend-design,
@@ -276,15 +275,14 @@ Sıra ve onay durumu (2026-09-11 akşam):
    "fast mode" diyor; iki tema × 1280/375'te taşma yok. Ölçüm deposundaki
    rapor (`reports/marketingskills.collide.md`) başına iki koşumun farkını
    söyleyen not eklendi (`633f4b3`).
-   **Sıradaki: v3 ile tam koşum (N=10, ~$10), sitedeki hızlı koşumun yerini
-   alacak — roadmap "Ölçüm-1". Onay bekliyor (para), henüz yapılmadı.**
+   v3 tam koşumu (roadmap "Ölçüm-1") **Ertelendi (kullanıcı kararı, 2026-09-13):** ifade bağlama deneyinin B kolu bugünkü kurulumun aynısı; deney tam modda koşulursa v3 tam matrisi de oradan gelir — iki kez ödenmez. Ayrı bir v3 tam koşumu yapılmayacak.
 2. ~~Üç eski ölçümün yayımlanması~~ — **tamam**: animate, better-typography,
    ui-ux-pro-max public (anonim istekle doğrulandı, 2026-09-11). Yalnız
    marketing-skills v2 (0bec859e) gizli; bilinçli karar.
 3. **0.3.1-a — uyarlanabilir durdurma.** Sabit bakış çizelgesi + Bonferroni;
    ~2 gün kod + kalibrasyon koşumu (~$10–20). **Onay bekliyor (para).**
-4. İsteğe bağlı: 0.4.1/0.4.2 için dış depo doğrulaması (`gh workflow run
-   assay.yml -R ktlesr/assay-example`, birkaç sent). **Onay bekliyor (para).**
+4. ~~Dış depo doğrulaması~~ — **0.4.4 için tamam (2026-09-13)**: dış depodan doğrulandı (`ktlesr/assay-example`, koşum `34754816362`: `@v1` → `6e491ed`, `assay-version: 0.4.4`, kayıtta `assayVersion: "0.4.4"`, 3 vaka / 6 deneme `pass`, `scrub` çalıştı).
+   0.4.1–0.4.3 dışarıdan hiç koşulmadı; 0.4.4 onların üst kümesi.
 5. Kayıt dışı kalanlar, küçük: tanıtım sayfasının öne çıkardığı suite
    yayımlananlara göre değişiyor (şu an hallmark) — bilinçli seçim gerekirse
    bir "featured" alanı; `robots.ts` `/compare`'ı taramaya kapalı tutuyor
