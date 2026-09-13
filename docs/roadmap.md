@@ -753,10 +753,10 @@ Makinenin ölçüme karıştığı yerlerin hepsini kapatıyor: CLAUDE.md, `%TEM
 | Adım | Çıktı | İş | Durum |
 |---|---|---|---|
 | K0 Varsayımları ölç | Claude Code'un dış adresleri, proxy'den SSE, kök olmayan kullanıcı, imajda talimat yok; kapasite (1/2/4 paralel) | S | **tamam** — varsayımların hepsi tuttu; iki tasarım düzeltmesi (ajan çıkışı izin listesi, tarayıcı imajda); konteyner başına ≤1 GB bellek, ~1,4 çekirdek patlama, ≤1 GB geçici disk (`runner-environment.md`, K0 sonuçları) |
-| K1 Deneme imajı | Pinli Claude Code, uid 1000, boş HOME, talimat denetimi | M | bekliyor |
+| K1 Deneme imajı | Pinli Claude Code, uid 1000, talimat denetimi; Chromium imajda; ajan çıkışı izin listesinden (npm registry, Playwright) | M | **tamam** — `tools/runner-env/`; `verify.mjs`'nin dokuz kontrolü geçti, üç düzenek ters çevirmesi kırmızı; K2'ye üç bulgu (`NO_PROXY`, zorunlu olmayan trafik, izin listesi kayda) (`runner-environment.md`, K1 sonuçları) |
 | K2 Konteyner worker'ı | `superviseAttempt` konteynerde; kayda `platform` + imaj özeti | M–L | bekliyor |
 | K3 Kimlik proxy'si | Anahtar enjeksiyonu, tek upstream, koşum başına sayaç/tavan | M | bekliyor |
-| K4 Sunucu | Ayrı VPS, sırlar, kalıcı disk | S | **ertelendi** — K0 sayılarına göre kullanıcı karar verecek; makul değilse yerelde devam |
+| K4 Sunucu | Ayrı VPS, sırlar, kalıcı disk | S | **ertelendi** — yerelde devam (kullanıcı kararı, 2026-09-13); karar K4'te, gerekirse o zaman |
 | K5 Tetik ve doğrulama | `assay-remote`; bilinen bir suite'i sunucuda koşup karşılaştırmak | S–M | bekliyor — ~$5–10, onay |
 | K6 Belgeler | sandbox-security A1/A2/A3 yeniden | S | bekliyor |
 | K7 Gerçek pin 3 | Proxy'nin gördüğü sistem isteminden `systemPromptHash`; `--exclude-dynamic-system-prompt-sections` kendisi bir koşul | M | bekliyor — K5'ten sonra (kullanıcı kararı) |

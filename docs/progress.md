@@ -278,10 +278,12 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 Sıra ve onay durumu (2026-09-13):
 
-0a. **Temiz koşum ortamı — K0 tamam, sunucu kararı kullanıcıda** (2026-09-13):
-    [runner-environment.md](runner-environment.md) "K0 sonuçları". Varsayımların
-    hepsi tuttu; kapasite: konteyner başına ≤~1 GB, 4 paralel en kötü ~4 GB. Karar:
-    sunucu mu, yerelde devam mı. Sonraki adım K1 (deneme imajı) — ikisinde de aynı.
+0a. **Temiz koşum ortamı — K0 ve K1 tamam, yerelde devam** (2026-09-13):
+    [runner-environment.md](runner-environment.md) "K0 sonuçları", "K1 sonuçları".
+    Sunucu kararı K4'e (kullanıcı kararı). K1: `tools/runner-env/` (deneme imajı +
+    çıkış izin listesi proxy'si; `node tools/runner-env/verify.mjs` ücretsiz,
+    dokuz kontrol). Sonraki adım K2 (konteyner worker'ı); K1'in üç bulgusu orada:
+    `NO_PROXY`, zorunlu olmayan trafik, izin listesi ve imaj özeti kayda.
 00. ~~0.4.5 yayını ve maruz kayıtlar~~ — **tamam (2026-09-13)**: yayımlandı,
     `v1` taşındı; maruz kayıtlara künye notu düşüldü, yeniden ölçülmedi.
 

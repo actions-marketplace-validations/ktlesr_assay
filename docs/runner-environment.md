@@ -330,6 +330,12 @@ için zorunlu bir çağrı bu yoldan gitmiyor.
    olması.
 2. **Playwright'ın tarayıcısı imajda.** Yoksa ajanın her `npx playwright`'ı ~150 MB
    indirir; imaj Chromium'la 0.67 GB.
+   *Düzeltme (K1):* K0'ın imajındaki tarayıcı ajana hiç ulaşmadı. `/opt`'a
+   `PLAYWRIGHT_BROWSERS_PATH` ile kurulmuştu ve adaptörün ortam allowlist'i bu
+   değişkeni geçirmiyor; üstelik ajan npm'deki son sürümü (1.63.0) kurdu, imajdaki
+   1.55.0'dı. p2-1'in izinde `chromium_headless_shell-1243` bulunamadı ve ajan
+   `npx playwright install chromium` ile indirdi. Aşağıdaki tablo bu indirmeyi de
+   içeriyor.
 
 ### Kapasite — gerçek koşum
 
@@ -385,3 +391,98 @@ Tavan: 7 ağır deneme küçük bir örnek ve varyans büyük (53–306 sn, $0.0
 4. **Gerçek pin 3 roadmap'te, K5'ten sonra** (K7).
 5. **Yeniden kurulacak taban çizgileri: marketingskills v3 ve impeccable 4.2.2.**
    Diğerleri kapandı.
+6. **Yerelde devam; sunucu kararı K4'e.** 4 paralel en kötü durum ~4 GB, bu
+   makinede 31 GB var; sunucu şu an bir sorun çözmüyor.
+
+## K1 sonuçları (2026-09-13)
+
+Dosyalar `tools/runner-env/`de: `Dockerfile` (iki hedef: `attempt`, `egress`),
+`egress.mjs` (izin listesi proxy'si), `check-instructions.sh`, `verify.mjs`
+(düzeneği kurup dokuz kontrolü koşan, ücretsiz betik), `egress.test.ts`.
+
+```
+docker build -t assay-egress --target egress tools/runner-env
+docker build -t assay-attempt tools/runner-env
+node tools/runner-env/verify.mjs
+```
+
+### İmaj
+
+| | |
+|---|---|
+| Taban | `node:22.20.0-bookworm-slim`, **özetle pinli** (etiket Debian güncellemeleriyle yeniden derleniyor) |
+| İçerik | Claude Code 2.1.270, `@ktlsr/assay` 0.4.5, Playwright 1.63.0'ın Chromium'u (`chromium-1243` + `chromium_headless_shell-1243`, 658 MB), git 2.39, Python 3.11, curl, procps. Sürümler `ARG`, varsayılanları pinli |
+| Kullanıcı | `node`, uid 1000. HOME'da yalnızca `.cache/ms-playwright`; kabuk başlangıç dosyaları silindi |
+| Talimat denetimi | `assay-check-instructions` derleme adımında koşuyor; bütün dosya sisteminde `CLAUDE.md`, `CLAUDE.local.md`, `.claude`, `/etc/claude-code` arıyor. İmajda boş |
+| Boyut | `assay-attempt` 2,28 GB, `assay-egress` 326 MB (açılmış) |
+| Özet (bu makinede) | `assay-attempt` `sha256:630415ad…c1515`, `assay-egress` `sha256:a648732d…c1a0` |
+
+**Tarayıcı neden HOME'da.** Adaptörün ortam allowlist'i `PLAYWRIGHT_BROWSERS_PATH`'i
+ajana geçirmiyor, bu yüzden tarayıcı Playwright'ın varsayılan yolunda. Plan "boş
+HOME, deneme başına tmpfs" diyordu; ikisinin amacı talimat dosyası ve denemeler
+arası kalıntıydı. Deneme başına konteyner zaten her denemeyi imajdaki HOME'la
+başlatıyor, tarayıcı da talimat değil. Denetim bu yüzden "HOME boş" değil "imajda
+talimat yok" diye soruyor.
+
+**Playwright sürümü neden 1.63.0.** Ajan `npm install playwright` yazıyor ve o günün
+son sürümünü alıyor; tarayıcı revizyonu o sürümle aynı değilse indiriyor. npm'deki
+sürüm ilerledikçe indirme geri gelir. İzinli (`cdn.playwright.dev`) ama yavaş, ve
+imajı yükseltme işareti.
+
+### Çıkış izin listesi
+
+Deneme konteyneri `internal: true` bir ağda; tek komşusu çıkış proxy'si, proxy
+dışa da bağlı. Konteynere `HTTPS_PROXY=http://<egress>:3128`. Proxy yalnızca
+`CONNECT <ad>:443` kabul ediyor ve adın listede birebir olmasını istiyor:
+`registry.npmjs.org`, `cdn.playwright.dev`, `playwright.download.prss.microsoft.com`
+(Playwright 1.63.0'ın ayna listesi, kaynağından). Düz HTTP ile proxy'lenen her istek 403.
+
+İzin listesini **ağ** zorluyor, istemcinin iyi niyeti değil: proxy'ye uymayan bir
+bağlantı (Node'un kendi `fetch`'i, ham soket, doğrudan IP) iç ağdan çıkamıyor.
+
+| Kontrol (`verify.mjs`) | Sonuç |
+|---|---|
+| Dış adlar çözülüyor mu (DNS kanalı) | Hayır — Docker'ın gömülü DNS'i iç ağda yalnızca konteyner adlarını çözüyor |
+| Proxy'siz çıkış, ada ve çıplak IP'ye | Yok |
+| npm registry ve Playwright CDN proxy üzerinden | Geçiyor |
+| Başka bir ad, `api.anthropic.com` dahil | Proxy 403 veriyor |
+| Fixture'ın `npm install`'ı (vite 6, react 19; esbuild ve rollup'ın platform paketleri) + `playwright@1.63.0` + Chromium başlatma | Geçiyor; **hiçbir tarayıcı indirilmedi** (proxy'nin gördüğü tek `cdn.playwright.dev` bağlantısı curl kontrolününki) |
+| `assay run` proxy arkasında, sahte API ile | İki deneme tamamlandı, `environment.memory: []` |
+
+Proxy'nin bir koşumda gördüğü: 19 izinli `registry.npmjs.org`, 1 izinli
+`cdn.playwright.dev`, 11 reddedilen `api.anthropic.com` (Claude Code'un zorunlu
+olmayan trafiği, aşağıda), 1 reddedilen `example.com`.
+
+**Ters çevirme.** Birim testi (`allows`): port kontrolü yok, sonek eşleşmesi,
+alt dize eşleşmesi, her şeye izin, büyük/küçük harf duyarlı — beşi de kırmızı.
+Düzenek: her şeye izin veren proxy → "başka ad reddedildi", "api.anthropic.com
+reddedildi" ve "listede olmayan izinli hedef" kırmızı; iç olmayan ağ → DNS ve iki
+"proxy'siz çıkış yok" kırmızı; tarayıcısız HOME → başlatma kırmızı. Talimat
+denetimi: beş yola bırakılan dosyanın beşinde ve derleme adımında düşüyor.
+
+### K2'ye taşınan bulgular
+
+1. **`NO_PROXY=<kimlik proxy'si>` şart.** Claude Code `http://` bir
+   `ANTHROPIC_BASE_URL`'yi de `HTTPS_PROXY`'ye gönderiyor; ilk koşumda çıkış proxy'si
+   model çağrısını reddetti ve iki deneme `unknown` oldu (doğru cevap: ölçülmedi).
+   `NO_PROXY` adaptörün allowlist'inde, konteynere verilmesi yetiyor.
+2. **Zorunlu olmayan trafik kapanmıyor.** `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+   adaptörün allowlist'inde değil; imaja koymak ajana ulaşmazdı, konmadı. Çağrılar
+   proxy'de reddediliyor ve oturumu bozmuyor (K0'da da bozmadı). Allowlist'e
+   eklenirse günlükteki gürültü gider; kayda etkisi yok, ayrı ve küçük bir karar.
+3. **İzin listesi bir ölçüm koşulu.** Hangi adreslerin açık olduğu ajanın ne
+   yapabildiğini değiştiriyor; imaj özetiyle birlikte kayda ve ortam hash'ine
+   girmeli.
+
+### Tavanlar
+
+- Proxy ada göre süzüyor, içeriğe bakmıyor. İzinli bir adrese giden istek veri
+  taşıyabilir (ör. registry'ye bir paket adı olarak). Karşılığı konteynerde
+  sızdırılacak sır olmaması: gerçek anahtar yalnızca kimlik proxy'sinde (K3).
+- Kurulumu listede olmayan bir adrese giden paket (GitHub'dan ikili indiren
+  postinstall betikleri) kurulamaz; o vakanın denemesi bundan etkilenir. Liste
+  büyütülebilir; suite başına genişletme vaka setinde beyan edilmeli (0.2.0-c ile
+  aynı ilke).
+- Python'un Playwright'ı imajda yok (planda "ayrı etiket"). Yeniden kurulacak iki
+  taban çizgisi (marketingskills v3, impeccable) gerektirmiyor; webapp-testing
+  ölçülürken eklenir.

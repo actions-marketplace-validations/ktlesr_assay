@@ -3259,3 +3259,46 @@ K0 (ayrıntı `docs/runner-environment.md`, düzenek `tools/k0/`):
   tasarımın hedefi değil. Kayıtlar yüklenmedi.
 - Yan bulgu: `resolveFixtures` yalın dosya adıyla verilen suite'te fixture'ı bulamıyor
   (roadmap'e yazıldı, düzeltilmedi).
+
+## 2026-09-13 — K1: deneme imajı ve ajanın çıkışı için izin listesi
+
+Bağlam: Kullanıcı yerelde devam etmeyi seçti (sunucu kararı K4'e) ve K1'i K0'ın
+iki düzeltmesiyle istedi: tarayıcı imajda, ajanın çıkışı izin listesinden (npm
+registry ve Playwright).
+Seçenekler (izin listesi): Squid + `dstdomain` ACL · iptables/nftables ile IP
+süzme · iç ağ + küçük bir Node CONNECT proxy'si.
+(tarayıcı yeri): `/opt` + `PLAYWRIGHT_BROWSERS_PATH` (K0) · adaptörün allowlist'ine
+değişkeni eklemek · Playwright'ın varsayılan yolu (`~/.cache/ms-playwright`)
+Karar:
+- İzin listesi: `internal: true` ağ + `tools/runner-env/egress.mjs`. Yalnızca
+  `CONNECT <ad>:443`, ad listede birebir (`registry.npmjs.org`, `cdn.playwright.dev`,
+  `playwright.download.prss.microsoft.com`); düz HTTP 403. Deneme konteynerine
+  `HTTPS_PROXY`.
+- Tarayıcı varsayılan yolda, Playwright 1.63.0 (npm'deki son sürüm) ile.
+- Talimat denetimi bütün dosya sisteminde, derleme adımında; imajda da duruyor.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` imaja konmadı.
+Gerekçe:
+- Squid aynı işi yapardı ama ikinci bir yazılım ve yapılandırma dili; K3'ün kimlik
+  proxy'si zaten Node olacak ve iki proxy aynı dilde konuşursa birleşebilirler.
+  IP süzme CDN'lerin arkasındaki adreslerde tutmaz. Asıl güvence proxy değil ağ:
+  proxy'ye uymayan hiçbir bağlantı iç ağdan çıkamıyor, bu ölçüldü (ada, çıplak
+  IP'ye, DNS'e). Proxy'nin tek işi izinli adlara tünel açmak; kararı veren fonksiyon
+  (`allows`) beş mutasyonla sınandı.
+- K0'ın tarayıcısı ajana ulaşmadı: adaptörün ortam allowlist'i
+  `PLAYWRIGHT_BROWSERS_PATH`'i geçirmiyor ve ajan son sürümü kurdu (1.63.0,
+  imajdaki 1.55.0'dı). Allowlist'e eklemek bir sürüm ister ve yalnızca birinci
+  sorunu çözerdi. Varsayılan yol ikisini de kod değişikliği olmadan çözüyor. Plan
+  "boş HOME" diyordu; amacı talimat dosyası ve denemeler arası kalıntıydı, deneme
+  başına konteyner ikincisini zaten sağlıyor, tarayıcı talimat değil.
+- Değişken imajda olsa da adaptör onu ajana geçirmiyor; ajana ulaşmayan bir ayarı
+  imaja koymak yanıltıcı olurdu. Çağrılar proxy'de reddediliyor ve oturumu bozmuyor.
+Bulgular (K2'ye): Claude Code `http://` bir base URL'yi de `HTTPS_PROXY`'ye
+gönderiyor, bu yüzden kimlik proxy'si `NO_PROXY`'de olmalı (ilk koşumda iki deneme
+`unknown` oldu); izin listesi bir ölçüm koşulu, imaj özetiyle kayda girmeli.
+Tavan: proxy ada göre süzüyor, içeriğe bakmıyor; izinli bir adrese giden istek veri
+taşıyabilir. Konteynerde sır olmaması (K3) bu yüzden ayrı bir koşul.
+Doğrulama: `node tools/runner-env/verify.mjs` dokuz kontrolün dokuzunu geçti.
+Üç düzenek ters çevirmesinin (her şeye izin veren proxy, iç olmayan ağ,
+tarayıcısız HOME) her biri tam kendi kontrollerinde kırmızı. Talimat denetimi beş
+yola bırakılan dosyanın beşinde ve derleme adımında düştü.
+Geri dönüş maliyeti: düşük (araç dizini; ürün kodu değişmedi)
