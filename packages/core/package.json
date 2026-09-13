@@ -1,6 +1,6 @@
 {
   "name": "@ktlsr/assay-core",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Assertion engine, three-valued verdicts, Wilson-interval scoring and canonical run records for Assay — a CI test runner for Agent Skills. Pure TypeScript, no I/O.",
   "keywords": [
     "agent-skills",

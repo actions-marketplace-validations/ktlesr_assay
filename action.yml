@@ -96,7 +96,7 @@ inputs:
     # Yani birleştirme ile yayın arasında burası npm'de henüz olmayan bir
     # sürümü gösteriyor. Bu pencere kasıtlı ve kısa; sırayı tersine çevirmek
     # pini kalıcı olarak bir sürüm geride bırakırdı.
-    default: '0.4.3'
+    default: '0.4.4'
   claude-code-version:
     description: Version of @anthropic-ai/claude-code to install as the host.
     required: false

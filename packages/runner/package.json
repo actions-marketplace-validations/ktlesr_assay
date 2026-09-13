@@ -1,6 +1,6 @@
 {
   "name": "@ktlsr/assay-runner",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Sandboxed run execution, host adapter contract and local run store for Assay — a CI test runner for Agent Skills.",
   "keywords": [
     "agent-skills",

@@ -1,6 +1,6 @@
 {
   "name": "@ktlsr/assay",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "A CI test runner for Agent Skills. Measures whether a skill triggers on the right request, stays quiet on the wrong one, produces the artifact it promised, and still does all of that tomorrow.",
   "keywords": [
     "agent-skills",

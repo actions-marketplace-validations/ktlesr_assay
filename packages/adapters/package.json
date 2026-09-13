@@ -1,6 +1,6 @@
 {
   "name": "@ktlsr/assay-adapters",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Host adapters for Assay. The Claude Code adapter reads trigger, tool-trace, completion and cost signals from an isolated session.",
   "keywords": [
     "agent-skills",
