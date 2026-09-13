@@ -46,7 +46,7 @@ export interface WorkerPayload {
   index: number
   adapter: AdapterSpec
   /** `RunOptions`ın süreç sınırından geçebilen kısmı. */
-  options: Pick<RunOptions, 'source' | 'suitePath' | 'skillPath'>
+  options: Pick<RunOptions, 'source' | 'suitePath' | 'skillPath' | 'layers'>
   /** Sonucun yazılacağı dosya. */
   resultPath: string
 }

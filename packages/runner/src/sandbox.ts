@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
+import { dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
 import type { CapturedFile, EnvDiff, NetworkRequest, TraceEvent } from '@ktlsr/assay-core'
 
 /** Yol → içerik hash'i. Anlık görüntü. */
@@ -76,6 +76,20 @@ async function workRoot(): Promise<string> {
     if (ok) return candidate
   }
   return tmpdir()
+}
+
+/**
+ * Vakanın fixture yolu, suite dosyasının dizinine göre.
+ *
+ * Eskiden dizin "son `/`'den öncesi" diye alınıyordu; suite yalın dosya adıyla
+ * verilince (`assay run x.suite.yaml`) ayraç yoktu ve dosya adının kendisi dizin
+ * sayılıyordu — fixture `x.suite.yaml/../fixtures/…` olup bulunamıyor, deneme
+ * `unknown` oluyordu (K0'da bulundu).
+ */
+export function resolveFixtures(fixtures: string | undefined, suitePath?: string): string | undefined {
+  if (fixtures === undefined) return undefined
+  if (suitePath === undefined || isAbsolute(fixtures)) return fixtures
+  return join(dirname(suitePath), fixtures)
 }
 
 /** Bir attempt için temiz çalışma dizini kurar ve fixture'ları kopyalar. */

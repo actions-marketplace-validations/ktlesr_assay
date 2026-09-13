@@ -665,6 +665,32 @@ export interface Environment {
    * bir kayıt bu yüzden "ortam kaydı" olarak ayrışır ve karşılaştırılmaz.
    */
   memory?: readonly string[]
+  /**
+   * Deneme bir konteynerde koştuysa, konteynerin koşulları (K2).
+   *
+   * Alan yoksa deneme ana makinede, runner'ın bir alt sürecinde koştu. Varsa
+   * hash'e giriyor: imaj, platform, ajanın çıkabildiği adresler ve sınırlar
+   * ölçümün koşulu. Girmeseydi konteyner kayıtları dizüstü kayıtlarıyla sessizce
+   * karşılaştırılırdı. Alan yalnızca konteyner koşumlarında yazıldığı için
+   * dizüstü kayıtlarının hash'i değişmiyor.
+   */
+  container?: ContainerEnvironment
+}
+
+/** Denemenin koştuğu konteyner — runner'ın başlattığı hâliyle. */
+export interface ContainerEnvironment {
+  /**
+   * İmajın özeti (`sha256:…`). Node, Claude Code, Chromium ve çıkış
+   * proxy'sinin kodu bunun içinde; Assay'in kendi kodu ana makineden geliyor
+   * ve kayıttaki `assayVersion` onu söylüyor.
+   */
+  image: string
+  /** İmajın işletim sistemi ve mimarisi, ör. `linux/amd64`. */
+  platform: string
+  /** Ajanın çıkabildiği adresler (çıkış proxy'sinin kendi bildirdiği liste), sıralı. */
+  egress: readonly string[]
+  /** Konteyner sınırları, ör. `memory 2g, cpus 2, pids 512`. */
+  limits: string
 }
 
 /** Ortamın iki koşum arasında kayan tek bir alanı. */
@@ -723,10 +749,39 @@ export function diffEnvironments(
       })
     }
   }
+  // Konteyner: yokluğu "ana makine" demek, alt alanlar tek tek (K2).
+  if (a.container === undefined || b.container === undefined) {
+    if (a.container !== b.container) {
+      changes.push({
+        field: 'container',
+        before: a.container === undefined ? HOST_PROCESS : containerText(a.container),
+        after: b.container === undefined ? HOST_PROCESS : containerText(b.container),
+      })
+    }
+  } else {
+    for (const key of ['image', 'platform', 'egress', 'limits'] as const) {
+      const before = String(a.container[key])
+      const after = String(b.container[key])
+      if (before !== after) {
+        changes.push({ field: 'container', before: `${key} ${before}`, after: `${key} ${after}` })
+      }
+    }
+  }
   return changes
 }
 
-const memoryText = (memory: readonly string[] | undefined) =>
+const HOST_PROCESS = 'none (a process on the host)'
+
+const containerText = (c: ContainerEnvironment) =>
+  `${c.image} ${c.platform}; egress ${c.egress.length === 0 ? 'none' : c.egress.join(', ')}; ${c.limits}`
+
+/** Denemenin nerede koştuğu, raporda okunacak hâliyle (K2). */
+export function containerLabel(run: Pick<Run, 'environment'>): string {
+  const container = run.environment?.container
+  return container === undefined ? HOST_PROCESS : containerText(container)
+}
+
+const memoryText =(memory: readonly string[] | undefined) =>
   memory === undefined ? 'not measured' : memory.length === 0 ? 'none loaded' : count(memory.length)
 
 /**

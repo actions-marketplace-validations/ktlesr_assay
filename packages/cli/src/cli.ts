@@ -112,6 +112,18 @@ Options
                       processes on this machine, and a killed attempt should
                       cost one attempt, not the run. It is a limit, not a
                       shield — the supervising process is a node process too.
+  --container <image> run each attempt in its own container from this image
+                      (tools/runner-env). The container has no way out but an
+                      egress proxy that admits the npm registry and Playwright's
+                      CDNs; Assay's own code is mounted from this machine. The
+                      image digest, platform, egress allowlist and limits go into
+                      the record and the environment hash, so container runs do
+                      not compare with runs on this machine.
+  --container-api <name:port>
+                      the container that answers the Anthropic API for the
+                      attempt containers (the credential proxy). It is attached
+                      to the run's network; attempts only ever see a placeholder
+                      key. Required with --container.
   --json              print the run record as JSON instead of a summary
   --suite <file>      the case set the run was measured with (push)
   --url <base>        hosted instance base URL (push, or ASSAY_URL)
@@ -146,6 +158,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         'allow-unmasked': { type: 'boolean' },
         'no-isolation': { type: 'boolean' },
         concurrency: { type: 'string' },
+        container: { type: 'string' },
+        'container-api': { type: 'string' },
         fast: { type: 'boolean' },
         'max-attempts': { type: 'string' },
         json: { type: 'boolean' },
@@ -463,35 +477,70 @@ async function run(
     )
   }
 
-  const record = await runSuite(effective, adapter, {
-    source,
-    suitePath: loaded.path,
-    skillPath: resolve(skillPath),
-    journalDir: store.directory,
-    ...(isolate === undefined ? {} : { isolate }),
-    ...(concurrency === undefined ? {} : { concurrency }),
-    ...(fast ? { layers: ['trigger'] as const } : {}),
-    ...(budget === undefined ? {} : { maxAttempts: budget }),
-    /*
-     * Hızlı modun tekrarı 3 — ama kullanıcı `--repeat` yazdıysa onunki
-     * kazanıyor. Değişmez #3 sağlanıyor: 3, 1'den büyük.
-     */
-    ...(repeat === undefined ? (fast ? { repeat: FAST_REPEAT } : {}) : { repeat }),
-    onProgress: (event) => {
-      if (options['json'] === true) return
-      const mark = {
-        pass: style.green('✓'),
-        fail: style.red('✗'),
-        unknown: style.yellow('?'),
-      }[event.verdict]
-      process.stderr.write(
-        `  ${mark} ${event.caseId} ${style.grey(`${event.attempt + 1}/${event.attempts}`)}\n`,
-      )
-      if (event.verdict !== 'pass') {
-        process.stderr.write(`      ${style.grey(event.reason.slice(0, 200))}\n`)
-      }
-    },
-  })
+  /*
+   * Konteyner koşumu (K2). Kimlik bilgisi konteynere hiç verilmiyor: API'yi
+   * kimlik proxy'si konteyneri cevaplıyor, deneme yalnızca yer tutucu anahtar
+   * görüyor. Proxy olmadan konteyner koşumu model çağıramaz; bu yüzden şart.
+   */
+  const containerImage = typeof options['container'] === 'string' ? options['container'] : undefined
+  const containerApi = typeof options['container-api'] === 'string' ? options['container-api'] : undefined
+  if (containerImage !== undefined && containerApi === undefined) {
+    process.stderr.write(
+      `${style.red('error')} --container needs --container-api <name:port>: the attempt containers reach the model only through a credential proxy container\n`,
+    )
+    return EXIT.usage
+  }
+  if (containerImage === undefined && containerApi !== undefined) {
+    process.stderr.write(`${style.red('error')} --container-api only applies with --container <image>\n`)
+    return EXIT.usage
+  }
+  if (containerImage !== undefined && isolate === undefined) {
+    process.stderr.write(
+      `${style.red('error')} --container runs every attempt in its own container; it cannot be combined with --no-isolation\n`,
+    )
+    return EXIT.usage
+  }
+
+  let record
+  try {
+    record = await runSuite(effective, adapter, {
+      source,
+      suitePath: loaded.path,
+      skillPath: resolve(skillPath),
+      journalDir: store.directory,
+      ...(isolate === undefined ? {} : { isolate }),
+      ...(containerImage === undefined || containerApi === undefined
+        ? {}
+        : { container: { image: containerImage, api: containerApi } }),
+      ...(concurrency === undefined ? {} : { concurrency }),
+      ...(fast ? { layers: ['trigger'] as const } : {}),
+      ...(budget === undefined ? {} : { maxAttempts: budget }),
+      /*
+       * Hızlı modun tekrarı 3 — ama kullanıcı `--repeat` yazdıysa onunki
+       * kazanıyor. Değişmez #3 sağlanıyor: 3, 1'den büyük.
+       */
+      ...(repeat === undefined ? (fast ? { repeat: FAST_REPEAT } : {}) : { repeat }),
+      onProgress: (event) => {
+        if (options['json'] === true) return
+        const mark = {
+          pass: style.green('✓'),
+          fail: style.red('✗'),
+          unknown: style.yellow('?'),
+        }[event.verdict]
+        process.stderr.write(
+          `  ${mark} ${event.caseId} ${style.grey(`${event.attempt + 1}/${event.attempts}`)}\n`,
+        )
+        if (event.verdict !== 'pass') {
+          process.stderr.write(`      ${style.grey(event.reason.slice(0, 200))}\n`)
+        }
+      },
+    })
+  } catch (cause) {
+    // Konteyner düzeni kurulamadı (imaj yok, API konteyneri yok): hiçbir şey koşmadı.
+    if (containerImage === undefined) throw cause
+    process.stderr.write(`${style.red('error')} ${message(cause)}\n`)
+    return EXIT.usage
+  }
 
   const savedTo = await store.save(record)
   await emit(record, options)

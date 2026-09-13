@@ -49,6 +49,12 @@ export {
   type SupervisedAttempt,
 } from './supervisor.js'
 export type { AdapterSpec, WorkerPayload } from './worker.js'
+export {
+  DEFAULT_EGRESS,
+  API_KEY_PLACEHOLDER,
+  withContainer,
+  type ContainerOptions,
+} from './container.js'
 
 export {
   RunJournal,

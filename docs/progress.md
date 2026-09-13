@@ -8,7 +8,27 @@ Kararların tam listesi [decisions.md](decisions.md), engeller
 ## Durum
 
 **Faz 0–3 tamam** · **kalibrasyon tamam** ·
-**npm'de 0.4.5** · **eylem v1.3.5** (`v1` → `d3146fb`, pin 0.4.5)
+**npm'de 0.4.5** · **eylem v1.3.5** (`v1` → `d3146fb`, pin 0.4.5) ·
+**temiz koşum ortamı K0–K2 tamam, yerelde** (K2 changeset'i hazır, yayımlanmadı)
+
+Son güncelleme: 2026-09-13 akşam (oturum kapanışı). Devam için **"Sırada" → "Yarın"**.
+
+## Oturum kaydı — 2026-09-13
+
+| commit | ne |
+|---|---|
+| `6e491ed` (PR #10) | **0.4.4 yayımlandı**: `compare` yalnızca durduran sebebi söylüyor. `v1` + `action-v1.3.4`; dış depodan doğrulandı (koşum `34754816362`) |
+| `145e9c4`…`d3146fb` (PR #11) | **Host CLAUDE.md sızıntısı kapandı, 0.4.5 yayımlandı** (koşum `34765415465`): çalışma kökü ev dışında (`C:\assay-work`), üst dizinler `claudeMdExcludes` ile kesiliyor, yüklenen talimat dosyaları `InstructionsLoaded` kancasıyla ölçülüp `environment.memory`e ve hash'e giriyor. CI'ın yakaladığı Linux yol kusuru `fa17f6d`. `v1` + `action-v1.3.5` |
+| `9b336df` | **Maruz kalmış kayıtlara künye notu**: 45 kayıt, sitede yayımlı 11 koşumun 11'i; iz sayısı, "No trace does not prove no effect", yeniden ölçmeme gerekçesi. Yeniden ölçülmedi (senin kararın) |
+| — | **jimy-r'ye yanıt gönderildi** (senin tarafından): `coreyhaines31/marketingskills` tartışma #584, ktlesr yanıtı 2026-09-13 14:59 UTC (`discussioncomment-18422708`). Taslak ve ifade bağlama raporu ölçüm deposunda (`3208ec7`, `84d9517`) |
+| `f8b7668` | Temiz koşum ortamı planı (`runner-environment.md`), kararların (API anahtarı, sunucu ertelendi, `acceptEdits`, pin 3 K7'de, iki taban çizgisi) |
+| `2b37fb1` | **K0**: varsayımlar ücretsiz ölçüldü, kapasite gerçek koşumla (14 deneme, $1.47 nominal, abonelik; kayıtlar yüklenmedi). Konteyner başına ≤~1 GB, 4 paralel en kötü ~4 GB → yerelde devam |
+| `863bd5b` | **K1**: deneme imajı (Chromium imajda, uid 1000, talimat denetimi) + ajan çıkışı için izin listesi (npm registry, Playwright). K0 düzeltmesi: K0'ın tarayıcısı ajana hiç ulaşmamıştı |
+| (bu commit) | **K2**: konteyner worker'ı. `--container`/`--container-api`; koşum başına iç ağ ve aynı imajdan çıkış proxy'si; Assay'in kodu ana makineden; imaj özeti, platform, izin listesi ve sınırlar kayıtta ve hash'te; `NO_PROXY`, zorunlu olmayan trafik, K0'daki fixture kusuru kapandı. `verify.mjs` 34/34; 12 birim + 4 uçtan uca ters çevirme kırmızı. Yayımlanmadı |
+
+Kapanışta: `assay-k0:attempt` ve `assay-egress` imajları silindi; kalan tek imaj
+`assay-attempt`. Yerel web (3100) ve geliştirme veritabanı (5434) kapatıldı.
+Bu makinedeki diğer konteynerler (3000/5433 ve `aprp-*`) başka projelerin; dokunulmadı.
 
 **0.4.5 yayımlandı (2026-09-13): host talimat dosyası sızıntısı.** Yayın koşumu
 `34765415465`, PR #11, registry'den doğrulandı; `v1` ve `action-v1.3.5` →
@@ -32,7 +52,7 @@ sebebi söylüyor, `RunComparison.note`, CLI `also:` satırı. Yayın koşumu
 --version` temiz dizinde 0.4.4. Eylem: `v1` ve `action-v1.3.4` → `6e491ed`,
 GitHub Release "Latest", `v1`'deki `action.yml` pini 0.4.4. Eylem dış depodan doğrulandı (`ktlesr/assay-example`, koşum `34754816362`: `@v1` → `6e491ed`, `assay-version: 0.4.4`, kayıtta `assayVersion: "0.4.4"`, 3 vaka / 6 deneme `pass`, `scrub` çalıştı).
 
-Son güncelleme: 2026-09-11 akşam (oturum kapanışı). assayctl.dev'de public: animate, better-typography,
+Yayım durumu (2026-09-11'den beri aynı): assayctl.dev'de public: animate, better-typography,
 ui-ux-pro-max, impeccable (3 koşum), hallmark, frontend-design,
 marketing-skills v3. Gizli:
 marketing-skills v2 (0bec859e, bilinçli). marketing-skills v3 (ilk kazananlı
@@ -278,12 +298,25 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 Sıra ve onay durumu (2026-09-13):
 
-0a. **Temiz koşum ortamı — K0 ve K1 tamam, yerelde devam** (2026-09-13):
-    [runner-environment.md](runner-environment.md) "K0 sonuçları", "K1 sonuçları".
-    Sunucu kararı K4'e (kullanıcı kararı). K1: `tools/runner-env/` (deneme imajı +
-    çıkış izin listesi proxy'si; `node tools/runner-env/verify.mjs` ücretsiz,
-    dokuz kontrol). Sonraki adım K2 (konteyner worker'ı); K1'in üç bulgusu orada:
-    `NO_PROXY`, zorunlu olmayan trafik, izin listesi ve imaj özeti kayda.
+### Yarın (2026-09-14'ten itibaren)
+
+| # | Adım | Durum |
+|---|---|---|
+| 1 | **K3 — kimlik proxy'si.** Gerçek anahtarı tutan konteyner (aynı imajdan, anahtar dosyadan/secret'tan), tek upstream `api.anthropic.com`, SSE aktarımı, koşum başına sayaç ve tavan; runner onu K2'nin `--container-api` yerine kendisi başlatacak. Ücretsiz, sahte API ile doğrulanır (K0 sunucusu şablon) | **başlamak için talimatını bekliyor** (K adımlarını tek tek başlatıyorsun) |
+| 2 | **0.4.6 yayını** — `.changeset/container-runs.md` hazır (konteyner koşumu, allowlist'e zorunlu olmayan trafik değişkeni, yalın dosya adıyla fixture düzeltmesi). Yayın, `v1` taşıma ve `action-v1.3.6` | **onay bekliyor** (npm geri alınamaz, etiket zorla taşınır). K3'le birlikte çıkması da mümkün |
+| 3 | **Anthropic API anahtarı** — ayrı Console workspace'i, harcama tavanı (karar 1). K3'ün gerçek koşumu ve K5 için gerekli | **senden bekliyor (sır)**; anahtar yalnızca proxy'nin okuyacağı dosyaya, repoya ve konteynere değil |
+| 4 | **K5 — doğrulama koşumu** (~$5–10): bilinen bir suite konteynerde, dizüstü sonucuyla aralıklar kesişmeli, `environment.memory: []`, yetim sıfır | **onay bekliyor (para)**; K3 ve anahtardan sonra |
+| 5 | **Taban çizgilerini konteynerde yeniden kurmak** — marketingskills v3, impeccable 4.2.2 (karar 5) | **onay bekliyor (para)**; K5'ten sonra |
+| 6 | Web koşum sayfasında `environment.container` satırı | ilk gerçek konteyner koşumuyla (ekran görüntüsü için veri gerekiyor); onay gerekmez |
+| 7 | K4 sunucu | **ertelendi** (senin kararın: gerekirse K4'te) |
+| 8 | K6 belgeler (sandbox-security A1/A2/A3), K7 gerçek pin 3 | K5'ten sonra; onay gerekmez / K7 senin sıralaman |
+| 9 | 0.3.1-a uyarlanabilir durdurma (aşağıda 3) | **onay bekliyor (para)** |
+| 10 | Impeccable'ı yeniden ölç (aşağıda 6) | yeni sürüm çıkınca; **onay bekliyor (para)** |
+
+0a. ~~Temiz koşum ortamı K0–K2~~ — **tamam (2026-09-13)**, yerelde:
+    [runner-environment.md](runner-environment.md) "K0/K1/K2 sonuçları".
+    `node tools/runner-env/verify.mjs` (34 kontrol, ücretsiz; `pnpm build` ve
+    `docker build -t assay-attempt tools/runner-env` gerektirir).
 00. ~~0.4.5 yayını ve maruz kayıtlar~~ — **tamam (2026-09-13)**: yayımlandı,
     `v1` taşındı; maruz kayıtlara künye notu düşüldü, yeniden ölçülmedi.
 
@@ -326,9 +359,10 @@ Ondan sonrası roadmap.md'nin "sonraki dalga"sı: model güncelleme
 sertifikasyonu, çapraz-host matrisi. Bilerek yapılmadı.
 
 **Ölçüm reposu (D:\assay-example = ktlesr/skill-trigger-measurements).**
-Son commit `05b820b` (v3 çakışma suite'i), origin ile eşit. Koşum kayıtları
-`.assay/runs/` altında ve `.assay/` gitignore'da (912ad216 dahil): kayıtların
-tek kopyası bu makinede.
+2026-09-13 kapanışında çalışma ağacı temiz; son commit `84d9517` (eski raporlara
+host CLAUDE.md notu ve #584 yanıt taslağı). Koşum kayıtları `.assay/runs/`
+altında ve `.assay/` gitignore'da: kayıtların tek kopyası bu makinede (K5'ten
+sonra sunucu/rsync planı bunu kapatıyor).
 
 ## Yayın durumu
 

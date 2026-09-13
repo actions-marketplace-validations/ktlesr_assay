@@ -427,6 +427,25 @@ describe('ortam allowlist"i — H1', () => {
     expect(passed['PATH'] ?? passed['Path']).toBeDefined()
   })
 
+  it('konteynerin ayarları ajana ulaşır: proxy dışı adres ve zorunlu olmayan trafik (K2)', () => {
+    const keys = ['NO_PROXY', 'HTTPS_PROXY', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] as const
+    const saved = keys.map((key) => process.env[key])
+    process.env['NO_PROXY'] = 'assay-api'
+    process.env['HTTPS_PROXY'] = 'http://assay-egress:3128'
+    process.env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
+    try {
+      const passed = passthroughEnv()
+      expect(passed['NO_PROXY']).toBe('assay-api')
+      expect(passed['HTTPS_PROXY']).toBe('http://assay-egress:3128')
+      expect(passed['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']).toBe('1')
+    } finally {
+      keys.forEach((key, i) => {
+        if (saved[i] === undefined) delete process.env[key]
+        else process.env[key] = saved[i]
+      })
+    }
+  })
+
   it('tanımlı olmayan değişkenler boş string olarak sızmaz', () => {
     delete process.env['NODE_OPTIONS']
     expect('NODE_OPTIONS' in passthroughEnv()).toBe(false)

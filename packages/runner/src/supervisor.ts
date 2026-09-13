@@ -22,8 +22,10 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { ChildProcess } from 'node:child_process'
 import type { RunLayer, Suite, SuiteCase } from '@ktlsr/assay-core'
-import { killChildTree } from './process.js'
+import { docker, launchAttempt, type ContainerLayout } from './container.js'
+import { killChildTree, type KillTreeResult } from './process.js'
 import type { AttemptResult } from './run.js'
 import { DONE, type AdapterSpec, type WorkerPayload } from './worker.js'
 
@@ -50,6 +52,12 @@ export interface SupervisorOptions {
    * yalnızca worker'ın ortamı.
    */
   env?: Record<string, string>
+  /**
+   * Verildiğinde deneme bu düzende bir konteynerde koşar (K2); `env` o zaman
+   * kullanılmıyor — konteynerin ortamını düzen belirliyor ve her konteynerin
+   * kendi ağ yığını olduğu için port kirası gerekmiyor.
+   */
+  container?: ContainerLayout
 }
 
 /** Sevk katmanının bir deneme hakkında öğrendikleri. */
@@ -116,16 +124,35 @@ export async function superviseAttempt(
     resultPath,
   }
 
-  try {
-    await writeFile(payloadPath, JSON.stringify(payload), 'utf8')
+  const timeoutMs = options.timeoutMs ?? 900_000
 
-    const child = spawn(process.execPath, [workerEntry(), payloadPath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
-      // POSIX'te kendi süreç grubunda: ağaç kapatma yürüyüşe ek olarak grubun
-      // tamamına da sinyal gönderiyor (process.ts). Windows'ta PPID yürünüyor.
-      ...(process.platform === 'win32' ? {} : { detached: true }),
-    })
+  try {
+    const launch =
+      options.container === undefined
+        ? undefined
+        : await launchAttempt(options.container, {
+            io: dir,
+            payload,
+            ...(options.suitePath === undefined ? {} : { suitePath: options.suitePath }),
+            timeoutMs,
+          })
+    await writeFile(payloadPath, JSON.stringify(launch?.payload ?? payload), 'utf8')
+
+    const child =
+      launch === undefined
+        ? spawn(process.execPath, [workerEntry(), payloadPath], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+            // POSIX'te kendi süreç grubunda: ağaç kapatma yürüyüşe ek olarak grubun
+            // tamamına da sinyal gönderiyor (process.ts). Windows'ta PPID yürünüyor.
+            ...(process.platform === 'win32' ? {} : { detached: true }),
+          })
+        : spawn('docker', launch.args, { stdio: ['ignore', 'pipe', 'pipe'] })
+
+    // Konteynerde ağaç yürümeye gerek yok: `docker rm -f` konteynerin bütün
+    // süreçlerini (cgroup) birlikte kapatıyor, yetim bırakacak bir dışarısı yok.
+    const stop = (): Promise<KillTreeResult> =>
+      launch === undefined ? killChildTree(child) : removeContainer(launch.name, child)
 
     let stderr = ''
     child.stderr?.setEncoding('utf8')
@@ -133,7 +160,6 @@ export async function superviseAttempt(
       stderr += chunk.length > 4000 ? chunk.slice(0, 4000) : chunk
     })
 
-    const timeoutMs = options.timeoutMs ?? 900_000
     let timedOut = false
     let reportedDone = false
 
@@ -149,7 +175,7 @@ export async function superviseAttempt(
     }>((resolve) => {
       const timer = setTimeout(() => {
         timedOut = true
-        void killChildTree(child)
+        void stop()
       }, timeoutMs)
 
       let buffered = ''
@@ -171,13 +197,13 @@ export async function superviseAttempt(
       })
     })
 
-    const tree = await killChildTree(child)
+    const tree = await stop()
 
     const raw = await readFile(resultPath, 'utf8').catch(() => null)
     if (raw === null) {
       return {
         result: null,
-        reason: reasonFor(closed, timedOut, reportedDone, stderr),
+        reason: reasonFor(closed, timedOut, reportedDone, stderr, launch !== undefined),
         exitCode: closed.code,
         signal: closed.signal,
         treeKilled: tree.ok,
@@ -195,6 +221,15 @@ export async function superviseAttempt(
   }
 }
 
+/** Konteyneri bütün süreçleriyle kaldırır; `docker` istemcisi de kapanır. */
+async function removeContainer(name: string, client: ChildProcess): Promise<KillTreeResult> {
+  const removed = await docker(['rm', '-f', name])
+  if (client.exitCode === null) client.kill('SIGKILL')
+  // İçerideki süreç öldüyse `--rm` konteyneri çoktan kaldırdı: geride bir şey yok.
+  if (removed.ok || /no such container/i.test(removed.stderr)) return { ok: true }
+  return { ok: false, reason: removed.stderr.trim() }
+}
+
 /**
  * Sonuç yoksa neden yok.
  *
@@ -206,8 +241,16 @@ function reasonFor(
   timedOut: boolean,
   reportedDone: boolean,
   stderr: string,
+  container = false,
 ): string {
   const tail = stderr.trim() === '' ? '' : `: ${stderr.trim().split('\n').slice(-3).join(' ')}`
+  if (container && !reportedDone && !timedOut) {
+    // `docker run` çıkış kodunu içerideki süreçten alıyor; 125 docker'ın kendisi.
+    if (closed.code === 125) return `the attempt container could not be started${tail}`
+    if (closed.code === 137) {
+      return `the attempt process was killed by SIGKILL inside its container before it reported a result; the measured agent runs as the same user as the attempt process there${tail}`
+    }
+  }
   if (reportedDone) {
     // Worker yazdığını söyledi ama dosya okunamadı: disk ya da izin sorunu,
     // ölçümün kendisi değil. Ayrı cümle, çünkü ayrı bir iş.

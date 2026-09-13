@@ -1,6 +1,7 @@
 # Temiz koşum ortamı — plan
 
-Durum: **tasarım; K0 tamam** (2026-09-13). Kararlar ve K0 sonuçları en altta.
+Durum: **K0, K1, K2 tamam; yerelde** (2026-09-13). Sunucu kararı K4'e ertelendi.
+Kararlar ve K0–K2 sonuçları en altta.
 
 ## Amaç ve kapsam
 
@@ -486,3 +487,92 @@ denetimi: beş yola bırakılan dosyanın beşinde ve derleme adımında düşü
 - Python'un Playwright'ı imajda yok (planda "ayrı etiket"). Yeniden kurulacak iki
   taban çizgisi (marketingskills v3, impeccable) gerektirmiyor; webapp-testing
   ölçülürken eklenir.
+
+## K2 sonuçları (2026-09-13)
+
+`assay run <suite> --skill <dir> --container assay-attempt --container-api <ad:port>`.
+Kod `packages/runner/src/container.ts`; supervisor'un sonuç dosyası sözleşmesi,
+zaman aşımı ve gerekçe cümleleri değişmedi, yalnızca başlatma (`docker run`) ve
+kapatma (`docker rm -f`) konteynere geçti.
+
+### Düzen
+
+| | |
+|---|---|
+| Koşum başına | `internal: true` bir ağ; çıkış proxy'si **aynı imajdan** (`node /opt/assay/egress.mjs`, dışa da bağlı); `--container-api` ile verilen API konteyneri (kimlik proxy'si) ağa bağlanıyor. Koşum bitince üçü de kalkıyor |
+| Deneme başına | `docker run --rm --init`, `--user node`, `--cap-drop ALL`, `no-new-privileges`, bellek 2 GB (takassız), 2 çekirdek, 512 süreç; imaj **özetle** koşuyor. `timeout -s KILL` supervisor ölse bile konteyneri zaman aşımı + 60 sn'de kapatıyor |
+| Ortam | `HTTPS_PROXY` (çıkış), `NO_PROXY` (API konteyneri), `ANTHROPIC_BASE_URL`, yer tutucu `ANTHROPIC_API_KEY`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Ana makinenin hiçbir değişkeni geçmiyor |
+| Bağlamalar | giriş/çıkış dizini (tek yazılabilir), skill kopyası, fixture, ve **Assay'in kodu**: runner, core ve adaptörün `dist` + `package.json`'ı, salt okunur |
+| Kayıt | `environment.container = { image, platform, egress, limits }`; ortam hash'i adaptörün hash'i + bu kayıttan. İzin listesi runner'ın verdiği değil, proxy'nin başlarken **kendi bildirdiği** liste; ayrışırsa koşum başlamıyor |
+
+**Assay'in kodu neden imajda değil.** İmajda paketlenmiş bir sürüm, ana
+makinedeki runner'dan farklı olabilirdi (geliştirilen bir sürüm, eski bir imaj)
+ve sürüm numarası bunu ayırmıyor: yayımlanmamış kod da `0.4.5` diyor. `dist`i
+bağlamak kodu yapısı gereği aynı tutuyor. İmaj yalnızca üçüncü taraf bağımlılıkları
+(ajv 8.20.0, yaml 2.9.0, zod 4.5.4 — kilit dosyasındaki sürümler) taşıyor.
+`node_modules` bağlanmıyor: pnpm'in Windows bağlantıları Linux'ta çözülmüyor.
+K1'in ayrı `egress` imajı kaldırıldı; proxy'nin kodu artık kayda giren imaj
+özetinin içinde. İmajdaki global `@ktlsr/assay` da kaldırıldı.
+
+**Dizüstü kayıtları değişmedi.** `container` yalnızca konteyner koşumunda
+yazılıyor; ana makinede koşan kayıtların hash'i aynı kaldı ve 0.4.5 kayıtlarıyla
+karşılaştırılmaya devam ediyor. Platform ayrıca yalnızca konteyner kaydında.
+
+### K1'in üç bulgusu
+
+1. **`NO_PROXY`** — konteyner ortamında API konteynerinin adı; model çağrısı
+   çıkış proxy'sine gitmiyor.
+2. **`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`** — adaptörün ortam allowlist'inde;
+   konteynerde runner `1` veriyor. Çıkış günlüğünde `api.anthropic.com` bağlantısı 0
+   (K1'de iki oturumda 11 reddedilen bağlantı vardı).
+3. **İzin listesi ve imaj özeti kayıtta ve hash'te** — `compare` konteyner
+   koşumunu dizüstü koşumuyla karşılaştırmıyor ve sebebi adıyla söylüyor:
+   `container: none (a process on the host) → sha256:… linux/amd64; egress …`.
+
+### Doğrulama (`node tools/runner-env/verify.mjs`, 34 kontrol, ücretsiz)
+
+K1'in kontrolleri, `--cap-drop ALL` ile Chromium başlatması dahil, yeni imajla
+tekrar geçti. K2, runner'ın kendi kurduğu düzende:
+
+| Kontrol | Sonuç |
+|---|---|
+| Konteynerin içinden görülen süreçler | `docker-init, timeout, node, sh, ps` — supervisor ve ana makine yok |
+| Kullanıcı / anahtar / ortam | uid 1000; yalnızca yer tutucu anahtar, OAuth yok; 11 değişken, ana makineninki yok |
+| Ağ | dış ad çözülmüyor, doğrudan çıkış yok, registry proxy'den 200, başka adres 403, `host.docker.internal` erişilemez |
+| Çalışma dizini | `/tmp/assay-attempt-…` (ev dizini dışında) |
+| Ajan worker'ı öldürüyor | deneme `unknown`: "killed by SIGKILL inside its container … the measured agent runs as the same user" |
+| Zaman aşımı | deneme `unknown`, konteyner kapatıldı |
+| Yetim süreç başlatan deneme | tamamlandı; koşum sonrası konteyner, çıkış proxy'si ve ağ kalmadı |
+| Kayıt | `container.image` = `docker image inspect` özeti, `linux/amd64`, üç adres, sınırlar; ortam hash'i ana makinenin hash'inden farklı |
+| Gerçek Claude Code, sahte API | iki oturum tamamlandı; `environment.memory: []`; kimlik proxy'si yalnızca yer tutucuyu gördü ve anahtarı kendisi ekledi |
+| CLI | `--container` koşumu terminalde `container sha256:…` satırı; `compare` exit 3 ve konteyneri adıyla; `--container-api` olmadan kullanım hatası |
+
+Sahte API K0'ın sunucusu (kimlik proxy'si + sahte Anthropic); K3'ün kimlik
+proxy'si aynı yere oturacak.
+
+**Ters çevirme.** Birim: on iki mutasyon (hash konteyneri yok sayıyor, `NO_PROXY`
+yok, yetkiler bırakılmış, skill yazılabilir, sonuç yolu ana makinede, ana makinenin
+anahtarı geçiyor, adaptör yanlış bağlanıyor, fark konteyneri görmüyor, etiket boş,
+eski fixture çözümü, allowlist değişkeni yok, `withContainer` boş) — üçü ilk
+biçimiyle derlemeyi bozdu ve geçersiz sayıldı, tip-geçerli biçimleriyle on ikisi de
+kendi testinde kırmızı. Uçtan uca dört mutasyon `verify.mjs`'de kırmızı:
+`NO_PROXY` yok → iki oturum `unknown`; allowlist değişkeni yok → çıkış günlüğünde
+yine `api.anthropic.com`; ağ iç değil → DNS, doğrudan çıkış **ve ana makinedeki
+geliştirme sunucusu** (`host.docker.internal:3100`) açık; konteyner koşulu kayda
+işlenmiyor → beş kontrol, `compare` dahil.
+
+### Tavanlar
+
+- **Ajan worker'la aynı kullanıcı.** Worker'ı öldürebiliyor (→ `unknown`) ve sonuç
+  dosyasına yazabiliyor; ikincisi ana makinede de mümkündü, burada da gözlenmiyor.
+  Yükseltme yolu ajanı ayrı bir kullanıcıyla başlatmak.
+- **Supervisor ölürse** deneme konteyneri en geç zaman aşımı + 60 sn'de kalkıyor; ağ
+  ve çıkış proxy'si elle temizliğe kalıyor (`docker rm -f assay-egress-…`,
+  `docker network rm assay-net-…`).
+- **Çıkış proxy'si koşum başına tek.** Günlüğü denemeye göre ayrılmıyor; ağ yan
+  etkisini kayda denemeye göre yazmak ayrı bir iş.
+- **Gerçek bir koşum K3'ü bekliyor.** Kimlik proxy'si yok; `--container-api` bugün
+  yalnızca doğrulamanın sahte sunucusuna ya da elle kurulmuş bir proxy'ye
+  bağlanabilir. Gerçek anahtar hiçbir yoldan konteynere verilmiyor.
+- Web koşum sayfası `environment.container`ı henüz göstermiyor; kayıt taşıyor ve
+  `compare` kullanıyor. İlk gerçek konteyner koşumuyla (K5) eklenir.

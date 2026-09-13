@@ -9,8 +9,24 @@ import {
   createWorkspace,
   destroyWorkspace,
   envDiff,
+  resolveFixtures,
   snapshot,
 } from './sandbox.js'
+
+describe('resolveFixtures', () => {
+  it('suite yalın dosya adıyla verilince de dizinini doğru bulur (K0 kusuru)', () => {
+    expect(resolveFixtures('../fixtures/app', 'x.suite.yaml')).toBe(join('..', 'fixtures', 'app'))
+  })
+
+  it('suite dizinine göre çözer; mutlak yolu ve suite\'siz yolu olduğu gibi bırakır', () => {
+    expect(resolveFixtures('./fixtures/app', join('suites', 'x.suite.yaml'))).toBe(
+      join('suites', 'fixtures', 'app'),
+    )
+    expect(resolveFixtures('/assay/fixtures', join('suites', 'x.suite.yaml'))).toBe('/assay/fixtures')
+    expect(resolveFixtures('fixtures/app')).toBe('fixtures/app')
+    expect(resolveFixtures(undefined, 'x.suite.yaml')).toBeUndefined()
+  })
+})
 
 const scratch = () => mkdtemp(join(tmpdir(), 'assay-sbtest-'))
 

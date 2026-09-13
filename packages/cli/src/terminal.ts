@@ -10,6 +10,7 @@
 import {
   assayVersionLabel,
   hostMemoryLabel,
+  containerLabel,
   memoryFromOutside,
   collisionPrefix,
   formatProportion,
@@ -159,6 +160,11 @@ export function renderRun(run: Run, summary: RunSummary): string {
       ? style.yellow(`host memory loaded from outside the working directory: ${leaked.join('; ')}`)
       : style.grey(`host memory ${hostMemoryLabel(run)}`),
   )
+  // Denemeler bir konteynerde koştuysa koşulları (K2); ana makinede koşan
+  // koşumda satır yok, her dizüstü raporuna bir "none" satırı eklenmesin diye.
+  if (run.environment?.container !== undefined) {
+    out.push(style.grey(`container ${containerLabel(run)}`))
+  }
   /*
    * Eş zamanlılık gecikmenin koşulu.
    *

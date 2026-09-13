@@ -11,6 +11,7 @@
 import {
   assayVersionLabel,
   hostMemoryLabel,
+  containerLabel,
   collisionPrefix,
   formatProportion,
   NO_SKILL,
@@ -363,6 +364,7 @@ ${unknownList}
     <dt>Environment hash</dt><dd class="mono">${escape(run.pins.environmentHash ?? 'not reported by the host')}</dd>
     <dt>Permission mode</dt><dd class="mono">${escape(run.permissionMode ?? 'not reported by the host')}</dd>
     <dt>Host memory</dt><dd class="mono">${escape(hostMemoryLabel(run))}</dd>
+    <dt>Container</dt><dd class="mono">${escape(containerLabel(run))}</dd>
     <dt>Assay version</dt><dd class="mono">${escape(assayVersionLabel(run))}</dd>
   </dl>
   <p class="note">The permission mode is part of the measurement: a skill whose

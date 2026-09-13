@@ -133,6 +133,13 @@ const ENV_PASSTHROUGH = [
   'HTTP_PROXY',
   'NO_PROXY',
   /*
+   * Host'un zorunlu olmayan trafiği (telemetri, güncelleme denetimi). Konteyner
+   * koşumunda runner `1` veriyor; K0'da açıkken host `api.anthropic.com`'a beş
+   * bağlantı açıyordu ve iç ağda çıkış proxy'si hepsini reddediyordu. Değer bir
+   * ayar, sır değil. Model davranışını değiştirmiyor; hash'e girmiyor.
+   */
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  /*
    * Port kirası (0.3.0-d).
    *
    * Eş zamanlı denemelerin ajanları aynı portu istemesin diye işçi başına

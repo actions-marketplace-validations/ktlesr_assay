@@ -26,6 +26,7 @@ export {
 export {
   assayVersionLabel,
   hostMemoryLabel,
+  containerLabel,
   memoryFromOutside,
   activationUnverified,
   ACTIVATION_UNVERIFIED,
@@ -39,6 +40,7 @@ export {
   type Pins,
   type PinComparison,
   type Environment,
+  type ContainerEnvironment,
   type EnvironmentChange,
   type PartialRun,
   type RunLayer,

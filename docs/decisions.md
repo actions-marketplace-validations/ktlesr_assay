@@ -3302,3 +3302,54 @@ Doğrulama: `node tools/runner-env/verify.mjs` dokuz kontrolün dokuzunu geçti.
 tarayıcısız HOME) her biri tam kendi kontrollerinde kırmızı. Talimat denetimi beş
 yola bırakılan dosyanın beşinde ve derleme adımında düştü.
 Geri dönüş maliyeti: düşük (araç dizini; ürün kodu değişmedi)
+
+## 2026-09-13 — K2: konteyner worker'ı; Assay'in kodu ana makineden, koşul kayıtta
+
+Bağlam: Kullanıcı K2'yi K1'in üç bulgusuyla istedi: `NO_PROXY`, zorunlu olmayan
+trafiğin ajana geçmesi, izin listesi ve imaj özetinin kayda ve hash'e girmesi.
+Seçenekler (kod): Assay'i imaja paketlemek (npm'den ya da depodan tarball) ·
+ana makinedeki `dist`i salt okunur bağlamak
+(koşul hash'e nasıl): her kaydın ortamına `platform` eklemek · yalnızca konteyner
+koşumunda `environment.container` · hash'i konteyner alanlarıyla birleştirmek
+(API): konteynere ana makinenin kimlik bilgisini geçirmek · yalnızca bir kimlik
+proxy'si konteyneri (`--container-api`) ve yer tutucu anahtar
+Karar:
+- Kod bağlanıyor: runner, core ve adaptörün `dist` + `package.json`'ı. İmaj yalnızca
+  üçüncü taraf bağımlılıkları (kilit dosyasındaki sürümler) taşıyor.
+- `environment.container = { image, platform, egress, limits }`, yalnızca konteyner
+  koşumunda; ortam hash'i = sha256(adaptörün hash'i + konteyner kaydı).
+- Kayda giren izin listesi proxy'nin başlarken kendi bildirdiği liste; runner'ın
+  verdiğiyle ayrışırsa koşum başlamıyor. Proxy aynı imajdan başlıyor, kodu imaj
+  özetinin içinde; ayrı `egress` imajı kaldırıldı.
+- Konteynere kimlik bilgisi hiçbir yoldan verilmiyor; `--container`, `--container-api`
+  olmadan kullanım hatası.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` adaptörün allowlist'inde; hash'e girmiyor.
+- K0'daki `resolveFixtures` kusuru aynı turda düzeltildi: konteyner modu fixture'ı ana
+  makinede çözüp bağlıyor ve aynı fonksiyonu kullanıyor.
+Gerekçe:
+- Paketlenmiş bir Assay ana makinedekinden farklı olabilir ve sürüm numarası bunu
+  ayırmıyor (yayımlanmamış kod da `0.4.5` diyor); npm ile tarball'dan kurulan paket
+  bağımlılığını yine registry'den çözüyor. Bağlamak kodu yapısı gereği aynı tutuyor.
+  `node_modules` bağlanmıyor: pnpm'in Windows bağlantıları Linux'ta çözülmüyor.
+- Her kayda `platform` eklemek bütün yeni dizüstü kayıtlarını 0.4.5 kayıtlarından
+  koparırdı; kullanıcının derdi konteyner ile dizüstünün sessizce karşılaştırılması.
+  Alan yalnızca konteynerde yazılınca dizüstü hash'i değişmiyor, ikisi ayrışıyor.
+  Hash'i adaptörün kanonikleştirmesini bilmeden birleştirmek iki paketi ayrı tutuyor.
+  Ortamı okunamamış denemeye koşul eklenmiyor (pin 3 ölçülmüş gibi görünmesin).
+- Runner'ın verdiği listeyi yazmak, proxy başka bir listeyle koşarsa kaydı yalana
+  çevirirdi.
+- Ana makinenin token'ını konteynere geçirmek, planın güvenlik kararını ("token
+  sunucuda durmalı", gerçek anahtar yalnızca kimlik proxy'sinde) K3 gelene kadar
+  delen bir kısayol olurdu ve bir kez var olursa kullanılırdı.
+Tavan: ajan konteynerde worker'la aynı kullanıcı; worker'ı öldürebilir (→ `unknown`)
+ve sonuç dosyasına yazabilir (ana makinede de mümkündü, gözlenmiyor). Supervisor
+ölürse deneme konteyneri zaman aşımı + 60 sn'de kalkıyor, ağ ve proxy elle temizliğe
+kalıyor. Web koşum sayfası `environment.container`ı henüz göstermiyor (ilk gerçek
+konteyner koşumuyla).
+Doğrulama: `verify.mjs` 34/34 (K1 12 + K2 22). Ters çevirme: birimde 12 (üçü ilk
+biçimiyle derlemeyi bozdu, tip-geçerli biçimleriyle kırmızı), uçtan uca 4; hepsi
+kendi kontrolünde kırmızı. Ağın `internal` olmadığı mutasyonda deneme konteyneri
+ana makinedeki geliştirme sunucusuna (`host.docker.internal:3100`) ulaşabildi — iç
+ağın kapattığı şey ölçülmüş oldu.
+Geri dönüş maliyeti: düşük (yeni bayraklar ve opsiyonel kayıt alanı; varsayılan
+davranış ve dizüstü kayıtlarının hash'i değişmedi)

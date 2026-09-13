@@ -43,12 +43,19 @@ import {
   destroyWorkspace,
   directoryHash,
   envDiff,
+  resolveFixtures,
   snapshot,
 } from './sandbox.js'
 import { assembleRun } from './assemble.js'
 import { localNames } from './identity.js'
 import { RunJournal, type JournalAttempt } from './journal.js'
-import { superviseAttempt } from './supervisor.js'
+import { superviseAttempt, workerEntry } from './supervisor.js'
+import {
+  openContainerRun,
+  withContainer,
+  type ContainerLayout,
+  type ContainerOptions,
+} from './container.js'
 
 /** Vakanın beklenen kazananı, normalize (0.4.0). */
 const winnerOf = (testCase: SuiteCase) => expectedWinnerOf(testCase.expect)
@@ -109,6 +116,12 @@ export interface RunOptions {
   portRangeStart?: number
   /** İşçi başına kaç port. Varsayılan 100. */
   portRangeSize?: number
+  /**
+   * Verildiğinde her deneme bir konteynerde koşar (K2). `isolate` şart: konteyner
+   * worker'ı adaptör tarifinden kuruyor. Konteyner koşulu (imaj özeti, platform,
+   * çıkış izin listesi, sınırlar) kayda ve ortam hash'ine giriyor.
+   */
+  container?: ContainerOptions
   /**
    * Ölçülecek katmanlar. Verilmezse hepsi.
    *
@@ -180,6 +193,17 @@ export async function runSuite<S extends AgentSession>(
   // kurtarılan bir hızlı mod koşumu tam ölçüm gibi okunur, bütçe kesmesi de
   // kaybolurdu.
   const { work, skipped } = planWork(suite, repeat, options)
+
+  // Konteyner düzeni journal'dan ÖNCE: kurulamazsa (imaj yok, API konteyneri
+  // yok) koşum hiç başlamamış olur ve arkada boş bir journal kalmaz.
+  if (options.container !== undefined && options.isolate === undefined) {
+    throw new Error('the container mode runs each attempt through the worker and needs the adapter recipe (isolate)')
+  }
+  const container =
+    options.container === undefined
+      ? undefined
+      : await openContainerRun(options.container, options.isolate as AdapterSpec, id, workerEntry())
+
   const journal = await openJournal(options, {
     id,
     startedAt,
@@ -199,7 +223,13 @@ export async function runSuite<S extends AgentSession>(
   // Ajana kullanıcının canlı skill dizini değil, bir kopyası verilir. Aksi
   // hâlde ölçülen skill kendini değiştirip sonraki attempt'leri kirletebilir
   // ve ölçüm, ölçtüğü şey tarafından bozulurdu.
-  const skillCopy = await copySkill(options.skillPath)
+  let skillCopy: string
+  try {
+    skillCopy = await copySkill(options.skillPath)
+  } catch (cause) {
+    await container?.close()
+    throw cause
+  }
   const journalled: JournalAttempt[] = []
 
   /*
@@ -232,7 +262,16 @@ export async function runSuite<S extends AgentSession>(
               { ...options, skillPath: skillCopy },
               now,
             )
-          : await isolatedAttempt(suite, item.testCase, item.index, options, skillCopy, now, slot)
+          : await isolatedAttempt(
+              suite,
+              item.testCase,
+              item.index,
+              options,
+              skillCopy,
+              now,
+              slot,
+              container?.layout,
+            )
 
       const entry: JournalAttempt = {
         kind: 'attempt',
@@ -267,6 +306,7 @@ export async function runSuite<S extends AgentSession>(
     await Promise.all(Array.from({ length: workers }, (_unused, slot) => drain(slot)))
   } finally {
     await rm(skillCopy, { recursive: true, force: true }).catch(() => undefined)
+    await container?.close().catch(() => undefined)
   }
   journalled.push(...ordered.filter((entry): entry is JournalAttempt => entry !== undefined))
 
@@ -305,10 +345,12 @@ async function isolatedAttempt(
   skillCopy: string,
   now: () => Date,
   slot: number,
+  container?: ContainerLayout,
 ): Promise<AttemptResult> {
   const startedAt = now().toISOString()
   const began = Date.now()
   const supervised = await superviseAttempt(suite, testCase, index, {
+    ...(container === undefined ? {} : { container }),
     adapter: options.isolate as AdapterSpec,
     source: options.source,
     ...(options.suitePath === undefined ? {} : { suitePath: options.suitePath }),
@@ -320,7 +362,11 @@ async function isolatedAttempt(
     env: portLease(slot, options),
   })
 
-  if (supervised.result !== null) return supervised.result
+  if (supervised.result !== null) {
+    return container === undefined
+      ? supervised.result
+      : withContainer(supervised.result, container.environment)
+  }
 
   return {
     attempt: {
@@ -504,7 +550,7 @@ export async function runAttempt<S extends AgentSession>(
   let workspace: Awaited<ReturnType<typeof createWorkspace>> | undefined
   try {
     workspace = await createWorkspace({
-      fixtures: resolveFixtures(testCase, options.suitePath),
+      fixtures: resolveFixtures(testCase.setup?.fixtures, options.suitePath),
       prefix: 'assay-attempt-',
     })
   } catch (cause) {
@@ -732,14 +778,6 @@ function unknownAttempt(
     latencyMs: Date.now() - began,
     ...(trace === undefined ? {} : { trace }),
   }
-}
-
-function resolveFixtures(testCase: SuiteCase, suitePath?: string): string | undefined {
-  const fixtures = testCase.setup?.fixtures
-  if (fixtures === undefined) return undefined
-  if (suitePath === undefined) return fixtures
-  const dir = suitePath.replace(/[\\/][^\\/]*$/, '')
-  return `${dir}/${fixtures.replace(/^\.\//, '')}`
 }
 
 /** Skill dizinini geçici bir kopyaya alır. Ölçülen şey kaynağa dokunamaz. */
