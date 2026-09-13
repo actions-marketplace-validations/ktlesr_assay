@@ -706,6 +706,12 @@ koşulmadan bilinemez; ölçüm deposunda aynı kurulum dosyasız koşulduğunda
 | 0.4.5-c Her koşumda ölçülüyor | Host'un `InstructionsLoaded` kancası yüklediği her dosyayı bildiriyor; `UserPromptSubmit` kanaryası kancanın koştuğunu kanıtlıyor. `Environment.memory`: yok = ölçülmedi, `[]` = ölçüldü ve temiz, dolu = bunlar yüklendi (tür, yol, içerik hash'i). Ortam hash'ine giriyor; terminal, HTML ve hosted künyede "Host memory" satırı; dışarıdan yükleme terminalde sarı | **tamam** |
 | 0.4.5-d Geçmiş kayıtların taranması | `tools/host-memory-exposure.mjs` + yukarıdaki tablo | **tamam** |
 | 0.4.5-e İddiaların düzeltilmesi | README, adaptör README'si, measurements.md, sandbox-security.md (H5), host-feasibility.md, adaptör yorumu | **tamam** |
+| 0.4.5-f Yayımlı kayıtlara künye notu | Maruz kalmış kaydın künyesinde: sızıntı kapatılmadan önce yapıldı, bağlama ne girdiği ölçülmedi, iz sayısı (kayıtlardan üretilmiş `lib/host-memory-exposure.json`), "no trace does not prove no effect" ve yeniden ölçmeme gerekçesi. Yeniden ölçülmedi (kullanıcı kararı) | **tamam** |
+
+**Yayın.** 0.4.5 npm'de (2026-09-13; yayın koşumu `34765415465`, birleştirme
+`d3146fb`, PR #11); eylem `v1` ve `action-v1.3.5` → `d3146fb`. İlk sürüm hazırlığı
+Linux runner'ında bir testte düştü: `workRoots` platformu parametre alıp yolu
+çalışan makinenin `path` modülüyle hesaplıyordu (`fa17f6d` düzeltti).
 
 **Neden `CLAUDE_CODE_DISABLE_CLAUDE_MDS` değil.** Host'ta var ve bütün talimat
 yükleyicilerini kapatıyor (ikilide okundu, sondayla ölçüldü: iz 0). Ama fixture'ın

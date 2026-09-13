@@ -12,25 +12,36 @@
  *     girip hiçbir iz bırakmamış olabilir. İzin olmaması etkinin olmadığını
  *     kanıtlamaz.
  *
- * Kullanım: node tools/host-memory-exposure.mjs <runs dizini> <işaret> [<işaret> ...]
- * Örnek:   node tools/host-memory-exposure.mjs ../assay-example/.assay/runs graphify
+ * Kullanım: node tools/host-memory-exposure.mjs <runs dizini[,dizin...]> <işaret> [...] [--json <çıktı>]
+ * Örnek:   node tools/host-memory-exposure.mjs ../assay-example/.assay/runs,.assay/runs graphify \
+ *            --json apps/web/lib/host-memory-exposure.json
+ *
+ * `--json`: hosted künyedeki notun verisi (maruz kalmış kayıtlar, deneme ve iz
+ * sayılarıyla). Sayı elle yazılmıyor, bu komutla üretiliyor.
  *
  * İşaret ayırt edici olmalı: "knowledge graph" gibi alanın kendi terimi olan
  * bir ifade ilgisiz vakalarda da geçer (ai-seo'da geçti) ve yanlış iz sayılır.
  */
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const [dir, ...markers] = process.argv.slice(2)
-if (dir === undefined || markers.length === 0) {
-  console.error('kullanım: node tools/host-memory-exposure.mjs <runs dizini> <işaret> [...]')
+const args = process.argv.slice(2)
+const jsonAt = args.indexOf('--json')
+const jsonOut = jsonAt === -1 ? undefined : args.splice(jsonAt, 2)[1]
+const [dirs, ...markers] = args
+if (dirs === undefined || markers.length === 0) {
+  console.error('kullanım: node tools/host-memory-exposure.mjs <runs dizini[,dizin...]> <işaret> [...] [--json <çıktı>]')
   process.exit(2)
 }
 
 const lower = markers.map((m) => m.toLowerCase())
 const rows = []
-for (const file of readdirSync(dir).filter((f) => /^run-.*\.json$/.test(f)).sort()) {
-  const raw = readFileSync(join(dir, file), 'utf8')
+const files = dirs
+  .split(',')
+  .flatMap((dir) => readdirSync(dir).filter((f) => /^run-.*\.json$/.test(f)).map((f) => join(dir, f)))
+  .sort()
+for (const path of files) {
+  const raw = readFileSync(path, 'utf8')
   const record = JSON.parse(raw)
   const run = record.run ?? record
   const attempts = run.cases.flatMap((c) => c.attempts.map((a) => ({ caseId: c.caseId, a })))
@@ -55,6 +66,7 @@ for (const file of readdirSync(dir).filter((f) => /^run-.*\.json$/.test(f)).sort
     }
   }
   rows.push({
+    runId: run.id,
     id: run.id.slice(-8),
     date: run.startedAt.slice(0, 10),
     skill: run.skill ?? run.pins?.skillSource ?? '?',
@@ -81,3 +93,16 @@ const exposed = rows.filter((r) => r.exposed.startsWith('yes') || r.exposed === 
 console.log(`\n${rows.length} records · ${exposed.length} exposed · ${rows.filter((r) => r.seen > 0).length} with a visible trace`)
 const unknown = rows.filter((r) => r.exposed === 'unknown')
 if (unknown.length > 0) console.log(`no working-directory path recorded (exposure unknown): ${unknown.map((r) => r.id).join(', ')}`)
+
+if (jsonOut !== undefined) {
+  // Yalnızca yolu ev altında görünen (maruz kalmış) kayıtlar: künyede not
+  // bunlara düşüyor. Maruziyeti kayıttan okunamayanlar nota girmez.
+  const runs = Object.fromEntries(
+    rows
+      .filter((r) => r.exposed.startsWith('yes'))
+      .sort((a, b) => (a.runId < b.runId ? -1 : 1))
+      .map((r) => [r.runId, { attempts: r.attempts, traces: r.seen }]),
+  )
+  writeFileSync(jsonOut, `${JSON.stringify({ marker: markers.join(', '), runs }, null, 2)}\n`)
+  console.log(`wrote ${Object.keys(runs).length} exposed records to ${jsonOut}`)
+}

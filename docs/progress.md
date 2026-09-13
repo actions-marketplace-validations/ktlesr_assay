@@ -8,9 +8,13 @@ Kararların tam listesi [decisions.md](decisions.md), engeller
 ## Durum
 
 **Faz 0–3 tamam** · **kalibrasyon tamam** ·
-**npm'de 0.4.4** · **eylem v1.3.4** (`v1` → `6e491ed`, pin 0.4.4)
+**npm'de 0.4.5** · **eylem v1.3.5** (`v1` → `d3146fb`, pin 0.4.5)
 
-**0.4.5 hazır, yayımlanmadı (2026-09-13): host talimat dosyası sızıntısı.**
+**0.4.5 yayımlandı (2026-09-13): host talimat dosyası sızıntısı.** Yayın koşumu
+`34765415465`, PR #11, registry'den doğrulandı; `v1` ve `action-v1.3.5` →
+`d3146fb`. Sitedeki maruz kayıtların künyesinde not var (yeniden ölçülmedi,
+kullanıcı kararı; gerekçe notta).
+Önceki durum:
 Kullanıcının `~/.claude/CLAUDE.md`'si Windows'ta her denemenin bağlamına
 giriyordu (host çalışma dizininin üst dizinlerinde talimat arıyor, `%TEMP%` ev
 altında). Düzeltme üç katman: çalışma dizini ev dışında (`C:\assay-work`),
@@ -274,11 +278,8 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 Sıra ve onay durumu (2026-09-13):
 
-00. **0.4.5 yayını** — kod, testler, belgeler ve changeset hazır; ters çevirme
-    birimde 10/10, gerçek host'la uçtan uca (ücretsiz) yapıldı. Yayın ve `v1`
-    taşıma kullanıcıda. Ardından kullanıcı kararı: yayımlı kayıtlar maruz — not
-    düşülsün mü, yeniden mi ölçülsün (ifade bağlama tam koşumları `TEMP` `D:`'de
-    yapıldı, maruz değil).
+00. ~~0.4.5 yayını ve maruz kayıtlar~~ — **tamam (2026-09-13)**: yayımlandı,
+    `v1` taşındı; maruz kayıtlara künye notu düşüldü, yeniden ölçülmedi.
 
 0. ~~0.4.4 yayını~~ — **tamam (2026-09-13).** Registry'den doğrulandı;
    `v1` ve `action-v1.3.4` → `6e491ed` (kullanıcının açık onayıyla).

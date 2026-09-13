@@ -3187,3 +3187,30 @@ bilgisiz yapıldı ve hiçbir şey göstermedi: bellek, kimlik kontrolünden son
 yükleniyor. Araç: `tools/probe-host-memory.mjs`.
 Geri dönüş maliyeti: orta (ortam hash'inin tanımı genişledi; eski karşılaştırmalar
 durdu; çalışma kökü Windows'ta yer değiştirdi)
+
+## 2026-09-13 — 0.4.5 yayımlandı; maruz kayıtlara künye notu, yeniden ölçüm yok
+
+Kullanıcı kararı: yayımla, `v1`'i taşı, `action-v1.3.5`'i aç; sitedeki maruz
+kalmış kayıtlara künyede not düş, yeniden ölçme.
+- Yayın: koşum `34765415465`, `d3146fb` (PR #11). Dört paket registry'den okundu
+  (`latest=0.4.5`, npm 12.0.2/OIDC, provenance); `npm i @ktlsr/assay@0.4.5` temiz
+  dizinde `--version` 0.4.5 bastı ve kurulan adaptörde `claudeMdExcludes`, runner'da
+  `assay-work` var. `action-v1.3.5` açıldı, `v1` `6e491ed`'den `d3146fb`'ye taşındı;
+  `v1`'deki pin API'den 0.4.5. Sürüm notu Linux runner'ların etkilenmediğini söylüyor:
+  bugünkü dış depo koşumunun kaydında skill kopyası `/tmp/assay-skill-…`.
+- Yayından önce CI'ın yakaladığı bir kusur: `workRoots` platformu parametre alıp
+  yolu çalışan makinenin `path` modülüyle çözüyordu; Linux'ta `C:\Users\…` göreli
+  sayılıp ev kontrolü "dışında" diyordu. `path.win32`/`path.posix` ile düzeltildi,
+  `node:22.20.0` konteynerinde derlenmiş modülle doğrulandı.
+- Not: koşum sayfasının künyesinde (`HostMemoryNote`). Yalnızca kayıttan maruziyeti
+  okunan (yolları ev altında) ve ölçülmemiş kayıtlarda. Metin: kapatılmadan önce
+  yapıldı; dosya bağlama girmiş olmalı, hangilerinin girdiği ölçülmedi; iz sayısı;
+  "No trace does not prove no effect"; yeniden ölçmeme gerekçesi (iki store'daki
+  1.250 Skill çağrısının ve 1.237 aktivasyonun hiçbiri `graphify`'ı hedeflemiyor —
+  doğrulandı; etkilenebilir tek bulgu, marketing-skills positioning vakası, dosyasız
+  kolda 10/10'a karşı 8/10 yeniden üretildi — ölçüm deposu raporu).
+- Sayılar elle yazılmadı: `tools/host-memory-exposure.mjs --json` iki store'dan
+  `apps/web/lib/host-memory-exposure.json`'u üretiyor (45 maruz kayıt; sitede yayımlı
+  11 koşumun 11'i içinde). Metodoloji sayfasının verisiyle aynı disiplin.
+- Doğrulama: 3 birim ters çevirme (web typecheck kapılı) ve bileşen düzeyinde bir
+  canlı ters çevirme; hepsi kırmızı. Açık/koyu × 1280/375'te taşma yok.

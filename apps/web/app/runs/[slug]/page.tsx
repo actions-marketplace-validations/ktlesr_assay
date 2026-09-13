@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { CollisionMatrixSection } from '../../components/collision-matrix'
 import { CoverageNotices } from '../../components/coverage-notices'
+import { HostMemoryNote } from '../../components/host-memory-note'
 import { Pins } from '../../components/run-meta'
 import { Shell } from '../../components/shell'
 import { baselineFor } from '../../../lib/baseline'
@@ -186,6 +187,7 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
           moved because the model changed is not a regression in the skill.
         </p>
         <Pins run={run} />
+        <HostMemoryNote run={run} />
         {baseline === null ? null : (
           <p className="mt-8 text-sm">
             {baseline.kind === 'differs' ? (
