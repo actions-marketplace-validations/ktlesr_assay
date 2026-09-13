@@ -10,6 +10,17 @@ Kararların tam listesi [decisions.md](decisions.md), engeller
 **Faz 0–3 tamam** · **kalibrasyon tamam** ·
 **npm'de 0.4.4** · **eylem v1.3.4** (`v1` → `6e491ed`, pin 0.4.4)
 
+**0.4.5 hazır, yayımlanmadı (2026-09-13): host talimat dosyası sızıntısı.**
+Kullanıcının `~/.claude/CLAUDE.md`'si Windows'ta her denemenin bağlamına
+giriyordu (host çalışma dizininin üst dizinlerinde talimat arıyor, `%TEMP%` ev
+altında). Düzeltme üç katman: çalışma dizini ev dışında (`C:\assay-work`),
+üst dizinler `claudeMdExcludes` ile dışlanıyor, yüklenen dosyalar host'un
+`InstructionsLoaded` kancasıyla ölçülüp `environment.memory` olarak kayda ve
+ortam hash'ine giriyor. Changeset `host-memory-isolation.md`. **Sitede yayımlı
+her koşum maruz kalmış** (ayrıntı roadmap 0.4.5, tablo
+`tools/host-memory-exposure.mjs`); yayımlı kayıtlara ne yapılacağı kullanıcı
+kararı. Ücretsiz uçtan uca sonda: `tools/probe-host-memory.mjs`.
+
 **0.4.4 yayımlandı (2026-09-13):** core `compare` gerekçesi yalnızca durduran
 sebebi söylüyor, `RunComparison.note`, CLI `also:` satırı. Yayın koşumu
 `34754297580`, birleştirme `6e491ed` (PR #10); dört paket registry'de
@@ -261,7 +272,13 @@ geliyordu; `tools/fix-msys-domain-stall.ps1` ile kapatıldı (`a307c56`).
 
 ## Sırada
 
-Sıra ve onay durumu (2026-09-11 akşam):
+Sıra ve onay durumu (2026-09-13):
+
+00. **0.4.5 yayını** — kod, testler, belgeler ve changeset hazır; ters çevirme
+    birimde 10/10, gerçek host'la uçtan uca (ücretsiz) yapıldı. Yayın ve `v1`
+    taşıma kullanıcıda. Ardından kullanıcı kararı: yayımlı kayıtlar maruz — not
+    düşülsün mü, yeniden mi ölçülsün (ifade bağlama tam koşumları `TEMP` `D:`'de
+    yapıldı, maruz değil).
 
 0. ~~0.4.4 yayını~~ — **tamam (2026-09-13).** Registry'den doğrulandı;
    `v1` ve `action-v1.3.4` → `6e491ed` (kullanıcının açık onayıyla).

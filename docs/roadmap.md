@@ -659,6 +659,81 @@ saklanmalı ve gösterilmeli — `assayVersionLabel`in yaptığının aynısı.
 
 ---
 
+## 0.4.5 — Host talimat dosyası sızıntısı (izolasyon kusuru)
+
+**Amaç:** Ölçülen bağlama yalnızca skill ve suite'in fixture'ı girsin, ve
+girenin ne olduğu **ölçülüp** kayda yazılsın.
+
+**Kanıt.** Adaptör her denemeye temiz bir `CLAUDE_CONFIG_DIR` veriyor ve bunu
+"kullanıcının CLAUDE.md'si devrede değil" diye belgeliyordu. Yanlıştı. Claude
+Code çalışma dizininden köke kadar her dizinde `CLAUDE.md`, `.claude/CLAUDE.md`,
+`.claude/rules/` ve `CLAUDE.local.md` arıyor (2.1.270 ikilisinde okundu); Windows'ta
+`%TEMP%` ev dizininin altında olduğu için `C:\Users\<user>\.claude\CLAUDE.md`
+"üst dizindeki bir projenin" talimatı olarak her denemeye giriyordu. Dosya tek bir
+ilgisiz talimat taşıyor (`/graphify`). Ölçüm deposundaki kayıtlarda model bu adı
+fixture'daki ürünün adı sandı; bir denemede (912ad216, `positioning` #2) dosyayı
+okuyup düzenlemeye kalktı — host'un izin katmanı ve "önce oku" kuralı durdurdu,
+dosya değişmedi. Sızıntı ölçüm deposunda ifade bağlama deneyi sırasında bulundu
+(`reports/marketingskills.phrase-binding.md`, *Instrument*).
+
+**Ücretsiz kanıt (host'un kendisiyle).** Sahte bir API anahtarı ve yerel bir
+yakalayıcıya çevrilmiş `ANTHROPIC_BASE_URL`: host sistem istemini kurup gönderiyor,
+istek Anthropic'e gitmiyor. Aynı sonda üç koşulda:
+
+| Çalışma dizini | İstekte `graphify` |
+|---|---|
+| `%TEMP%` (ev altında) | 12 + `.claude\CLAUDE.md` yolu |
+| `D:\…` (ev dışında) | 0 |
+| `%TEMP%` + `claudeMdExcludes` | 0 |
+
+**Etki** (`tools/host-memory-exposure.mjs`, 2026-09-13). Ölçüm deposunda 48 kayıt:
+37'sinin kendi yolları çalışma dizininin ev altında olduğunu gösteriyor, 3'ü
+(ifade bağlama tam koşumları, `TEMP` `D:`'de) maruz değil, 8'inde yol yazılmamış.
+Görünür iz (`graphify` modelin metninde ya da araç argümanında) 6 kayıtta:
+ca6f250f 4/57, 0bec859e 10/200, 2a900c03 2/100, 2bc985d5 1/57, 912ad216 4/60,
+480df1cd 4/60. Assay deposunun kendi store'unda 12 kayıt, 8'i maruz, iz yok.
+**Sitede yayımlı her koşum maruz** (animate, better-typography, ui-ux-pro-max,
+impeccable ×3, hallmark, frontend-design ×3, marketing-skills v3); izi olan
+yayımlılar ui-ux-pro-max (2/100) ve marketing-skills v3 (4/60). İzin yokluğu
+etkinin yokluğu değil: dosya her denemede bağlamdaydı. Verdict'e etkisi yeniden
+koşulmadan bilinemez; ölçüm deposunda aynı kurulum dosyasız koşulduğunda
+(ifade bağlama B kolu) `positioning` bulgusu 10/10'dan 8/10'a indi.
+
+| Adım | Çıktı | Durum |
+|---|---|---|
+| 0.4.5-a Çalışma dizini ev dışında | `%TEMP%` ev altındaysa Windows'ta sürücü kökünde `assay-work`, POSIX'te `/tmp`; `ASSAY_WORK_ROOT` ile seçilebilir; oluşturulamazsa `%TEMP%` (b ve c devrede) | **tamam** |
+| 0.4.5-b Üst dizin taraması kesiliyor | Config dizinindeki `settings.json`'a `claudeMdExcludes`: çalışma dizininin her üst dizinindeki talimat yerleri. Çalışma dizininin kendisi dışlanmıyor (fixture'ın CLAUDE.md'si ölçümün parçası) | **tamam** |
+| 0.4.5-c Her koşumda ölçülüyor | Host'un `InstructionsLoaded` kancası yüklediği her dosyayı bildiriyor; `UserPromptSubmit` kanaryası kancanın koştuğunu kanıtlıyor. `Environment.memory`: yok = ölçülmedi, `[]` = ölçüldü ve temiz, dolu = bunlar yüklendi (tür, yol, içerik hash'i). Ortam hash'ine giriyor; terminal, HTML ve hosted künyede "Host memory" satırı; dışarıdan yükleme terminalde sarı | **tamam** |
+| 0.4.5-d Geçmiş kayıtların taranması | `tools/host-memory-exposure.mjs` + yukarıdaki tablo | **tamam** |
+| 0.4.5-e İddiaların düzeltilmesi | README, adaptör README'si, measurements.md, sandbox-security.md (H5), host-feasibility.md, adaptör yorumu | **tamam** |
+
+**Neden `CLAUDE_CODE_DISABLE_CLAUDE_MDS` değil.** Host'ta var ve bütün talimat
+yükleyicilerini kapatıyor (ikilide okundu, sondayla ölçüldü: iz 0). Ama fixture'ın
+kendi CLAUDE.md'sini de kapatır — gerçek bir depoda o dosya yüklenir ve ölçülen
+şey o olmalı. `--safe-mode` skill ve plugin'leri de kapatıyor, `--bare` OAuth
+okumuyor. `claudeMdExcludes` yalnızca üst dizinleri kesiyor.
+
+**Tavan.** Yönetilen (policy) talimat dosyaları host tarafından dışlanamıyor;
+ölçüm onları yakalar ve kayıt söyler. Kanca oturum isteme ulaşmadan düşerse o
+deneme "ölçülmedi" kalır. Ölçüm host'un `InstructionsLoaded` kancasına dayanıyor;
+host kancayı kaldırırsa alan yazılmaz ve kayıt "not measured" der — sessizce
+temiz demez.
+
+**Davranış değişikliği.** `memory` ortam hash'ine giriyor: 0.4.5 kayıtları 0.4.4
+ve öncesiyle karşılaştırılmıyor ("memory: not measured → none loaded"). Bu doğru
+cevap — eski kayıtlarda bağlama ne girdiği ölçülmedi, Windows'ta bir şey girdi.
+Windows'ta çalışma dizinleri `C:\assay-work\` altında açılıyor.
+
+**Doğrulama.** Birim: 10 ters çevirme derleme kapılı (ikisi ilk biçimiyle derlemeyi
+bozdu, geçersiz sayılıp tip-geçerli biçimle tekrarlandı); onu da kendi testinde
+kırmızı. Uçtan uca, gerçek host'la ve ücretsiz (`tools/probe-host-memory.mjs`):
+0.4.5'le istekte iz 0, kayıt `[]`; dışlama boşaltılıp çalışma dizini `%TEMP%`
+altında açılınca istekte iz 6 ve kayıt
+`Project C:\Users\<user>\.claude\CLAUDE.md sha256:f7d43e69…` — ölçüm sızıntıyı
+yakaladı. Kök düzeltmesi ve dışlama ayrı ayrı da tutuyor.
+
+---
+
 ## Sonraki dalga
 
 Faz 3'ten sonra değerlendirilecek. **Şimdi yapılmayacak.**

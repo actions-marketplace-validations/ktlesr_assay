@@ -5,6 +5,11 @@
  *  - Her koşum kendi geçici `CLAUDE_CONFIG_DIR`'ında yürür; kullanıcının global
  *    skill'leri devreye girmez (izole edilmemiş bir probe koşumunda 119 skill
  *    aktifti ve hedef skill hiç tetiklenmedi).
+ *  - `CLAUDE_CONFIG_DIR` kullanıcının CLAUDE.md'sini **tek başına kesmiyor**:
+ *    host çalışma dizininden köke kadar her dizinde talimat dosyası arıyor ve
+ *    Windows'ta `%TEMP%` ev dizininin altında (0.4.5). Üst dizinler
+ *    `claudeMdExcludes` ile dışlanıyor ve yüklenen her dosya host'un kendi
+ *    `InstructionsLoaded` kancasıyla **ölçülüp** kayda yazılıyor.
  *  - Test edilen skill `--plugin-dir` ile yalnızca o oturuma yüklenir.
  *  - Tetiklenme yalnızca `Skill` araç çağrısından okunur; metinden çıkarım yok.
  *  - `subtype: "success"` tek başına tamamlama kanıtı sayılmaz. Kimliği
@@ -16,8 +21,8 @@
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import type {
   AgentSession,
@@ -40,6 +45,11 @@ export interface ClaudeCodeSession extends AgentSession {
   /** Koşum hiç başlayamadıysa nedeni. */
   readonly spawnError?: string
   readonly configDir: string
+  /**
+   * Host'un yüklediği talimat dosyaları — ölçülmüşse. `undefined` "ölçülmedi"
+   * demek, "yüklenmedi" değil (bkz. `Environment.memory`).
+   */
+  readonly memory?: readonly string[]
 }
 
 /** Claude Code'un kabul ettiği izin modları. */
@@ -225,6 +235,7 @@ export class ClaudeCodeAdapter implements HostAdapter<ClaudeCodeSession> {
 
   async start(config: RunConfig): Promise<ClaudeCodeSession> {
     const configDir = await mkdtemp(join(tmpdir(), 'assay-cc-'))
+    await writeMemoryProbe(configDir, config.workdir)
     const startedAt = new Date().toISOString()
     const began = Date.now()
 
@@ -251,7 +262,9 @@ export class ClaudeCodeAdapter implements HostAdapter<ClaudeCodeSession> {
     // izine yazabilirdi. Yalnızca çalışması için gereken değişkenler geçer.
     const env: NodeJS.ProcessEnv = {
       ...passthroughEnv(),
-      // İzolasyon: kullanıcının skill'leri, plugin'leri ve CLAUDE.md'si devrede olmasın.
+      // İzolasyon: kullanıcının skill'leri ve plugin'leri devrede olmasın.
+      // CLAUDE.md'yi bu tek başına kesmiyor — üst dizin taraması ayrıca
+      // dışlanıyor ve ölçülüyor (writeMemoryProbe).
       CLAUDE_CONFIG_DIR: configDir,
     }
     const oauth = this.#credentials?.oauthToken ?? process.env['CLAUDE_CODE_OAUTH_TOKEN']
@@ -267,6 +280,8 @@ export class ClaudeCodeAdapter implements HostAdapter<ClaudeCodeSession> {
     })
 
     const parsed = parseSession(parseStreamJson(spawned.stdout))
+    // Config dizini finalize'da siliniyor; ölçüm ondan önce okunmalı.
+    const memory = await readMemoryProbe(configDir, config.workdir)
 
     return {
       id: `${this.id}-${config.caseId}-${config.attempt}-${parsed.init?.sessionId ?? began}`,
@@ -279,6 +294,7 @@ export class ClaudeCodeAdapter implements HostAdapter<ClaudeCodeSession> {
       stderr: spawned.stderr,
       ...(spawned.error === undefined ? {} : { spawnError: spawned.error }),
       configDir,
+      ...(memory === undefined ? {} : { memory }),
     }
   }
 
@@ -347,8 +363,8 @@ export class ClaudeCodeAdapter implements HostAdapter<ClaudeCodeSession> {
       latencyMs: session.latencyMs,
       ...(session.exitCode === null ? {} : { exitCode: session.exitCode }),
       ...(init === undefined ? {} : { activeSkills: init.skills }),
-      ...(init === undefined ? {} : { environmentHash: environmentHash(init) }),
-      ...(init === undefined ? {} : { environment: environmentOf(init) }),
+      ...(init === undefined ? {} : { environmentHash: environmentHash(init, session.memory) }),
+      ...(init === undefined ? {} : { environment: environmentOf(init, session.memory) }),
       // Host'un BİLDİRDİĞİ mod; adaptörün istediği değil. İkisi ayrışırsa
       // ölçümün koşulu host'un söylediğidir.
       // Host'un BİLDİRDİĞİ mod; adaptörün istediği değil. İkisi ayrışırsa
@@ -446,8 +462,11 @@ export function skillMatches(observed: string, target: string): boolean {
  * Bedeli: 0.2.0 öncesi kayıtlar yeni kayıtlarla "ortam kaydı" olarak
  * karşılaştırılır ve `unknown` üretir.
  */
-export function environmentHash(init: NonNullable<ParsedStream['init']>): string {
-  const canonical = JSON.stringify(environmentOf(init))
+export function environmentHash(
+  init: NonNullable<ParsedStream['init']>,
+  memory?: readonly string[],
+): string {
+  const canonical = JSON.stringify(environmentOf(init, memory))
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`
 }
 
@@ -459,7 +478,10 @@ export function environmentHash(init: NonNullable<ParsedStream['init']>): string
  * ayrışmasın diye hash bu fonksiyondan besleniyor: alan eklenirse hash de
  * kayıt da aynı anda öğrenir.
  */
-export function environmentOf(init: NonNullable<ParsedStream['init']>): Environment {
+export function environmentOf(
+  init: NonNullable<ParsedStream['init']>,
+  memory?: readonly string[],
+): Environment {
   return {
     model: init.model,
     version: init.version,
@@ -469,6 +491,165 @@ export function environmentOf(init: NonNullable<ParsedStream['init']>): Environm
     skills: [...init.skills].sort(),
     agents: [...init.agents].sort(),
     plugins: init.plugins.map((p) => `${p.name}@${p.version ?? ''}`).sort(),
+    // Yalnızca ölçüldüyse: ölçülmemiş bir oturumun hash'i 0.4.5 öncesiyle
+    // aynı kalır, ölçülmüş ve ölçülmemiş iki kayıt ise ayrışır.
+    ...(memory === undefined ? {} : { memory: [...memory].sort() }),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Talimat dosyaları (CLAUDE.md) — kesim ve ölçüm (0.4.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ölçüm kancasının yazdığı günlük, config dizininde.
+ *
+ * Neden gerekiyor: host çalışma dizininden köke kadar her dizinde
+ * `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/` ve `CLAUDE.local.md`
+ * arıyor. Windows'ta `%TEMP%` ev dizininin altında, dolayısıyla her denemede
+ * kullanıcının `~/.claude/CLAUDE.md`'si "üst dizindeki bir projenin" talimatı
+ * olarak bağlama giriyordu. `CLAUDE_CONFIG_DIR` bunu kesmiyor. Ölçüm deposundaki
+ * kayıtlarda model o dosyadaki aracın adını ürünün adı sandı.
+ */
+const MEMORY_LOG = 'assay-instructions.jsonl'
+const MEMORY_HOOK = 'assay-instructions-hook.mjs'
+
+/**
+ * Çalışma dizininin üstündeki her dizinde host'un talimat aradığı yerler.
+ *
+ * `claudeMdExcludes` mutlak yol ve glob kabul ediyor; yollar `/` ile yazılıyor,
+ * host Windows yollarını da böyle eşleştiriyor (ücretsiz sondayla ölçüldü:
+ * dışlanan dosya isteğe girmedi). Çalışma dizininin kendisi dışlanmaz — oradaki
+ * CLAUDE.md suite'in fixture'ı ve ölçümün bir parçası.
+ */
+export function ancestorExcludes(workdir: string): string[] {
+  const out: string[] = []
+  let dir = dirname(resolve(workdir))
+  for (;;) {
+    const base = toSlash(dir).replace(/\/$/, '')
+    out.push(`${base}/CLAUDE.md`, `${base}/CLAUDE.local.md`, `${base}/.claude/**`)
+    const parent = dirname(dir)
+    if (parent === dir) return out
+    dir = parent
+  }
+}
+
+/**
+ * Config dizinine kesimi ve ölçüm kancasını yazar.
+ *
+ * - `claudeMdExcludes`: üst dizinlerdeki talimat dosyaları yüklenmesin.
+ *   Yönetilen (policy) dosyalar host tarafından dışlanamıyor — onları ölçüm
+ *   yakalıyor.
+ * - `InstructionsLoaded`: host yüklediği her dosyayı (yol, tür, sebep) bu
+ *   kancaya bildiriyor. Bu bir tahmin değil, host'un kendi raporu.
+ * - `UserPromptSubmit`: kanarya. Temiz bir oturumda `InstructionsLoaded` hiç
+ *   çağrılmaz; kanarya yoksa "hiçbir şey yüklenmedi" ile "kanca koşmadı"
+ *   ayırt edilemezdi. Akışa girmiyor ve stdout'u boş, yani bağlama bir şey
+ *   eklemiyor (ölçüldü).
+ */
+export async function writeMemoryProbe(configDir: string, workdir: string): Promise<void> {
+  const script = join(configDir, MEMORY_HOOK)
+  await writeFile(
+    script,
+    [
+      "import { appendFileSync } from 'node:fs'",
+      "let input = ''",
+      "process.stdin.on('data', (chunk) => (input += chunk))",
+      "process.stdin.on('end', () => appendFileSync(process.argv[2], input.trim() + String.fromCharCode(10)))",
+      '',
+    ].join('\n'),
+  )
+  const command = [process.execPath, script, join(configDir, MEMORY_LOG)]
+    .map((part) => `"${toSlash(part)}"`)
+    .join(' ')
+  const hook = [{ hooks: [{ type: 'command', command }] }]
+  await writeFile(
+    join(configDir, 'settings.json'),
+    JSON.stringify(
+      {
+        claudeMdExcludes: ancestorExcludes(workdir),
+        hooks: { InstructionsLoaded: hook, UserPromptSubmit: hook },
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+async function readMemoryProbe(
+  configDir: string,
+  workdir: string,
+): Promise<readonly string[] | undefined> {
+  const text = await readFile(join(configDir, MEMORY_LOG), 'utf8').catch(() => undefined)
+  if (text === undefined) return undefined
+  const hashes = new Map<string, string>()
+  for (const line of text.split('\n')) {
+    const path = (safeJson(line) as { file_path?: unknown } | undefined)?.file_path
+    if (typeof path !== 'string' || hashes.has(path)) continue
+    const bytes = await readFile(path).catch(() => undefined)
+    hashes.set(
+      path,
+      bytes === undefined ? 'unreadable' : `sha256:${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}`,
+    )
+  }
+  return memoryEntries(text, workdir, hashes)
+}
+
+/**
+ * Kanca günlüğünden kayıt girişleri.
+ *
+ * `undefined` → ölçülmedi: kanarya yok (oturum isteme hiç ulaşmadı ya da
+ * kanca koşmadı). Kalan her durumda liste — boşsa "ölçüldü, yüklenmedi".
+ *
+ * Çalışma dizini dışından yüklenen her dosya giriyor, sebebi ne olursa olsun:
+ * o bir sızıntı. İçeriden yalnızca oturum başında yüklenenler: ajan fixture'ın
+ * alt dizinlerinde gezinirken yüklenenler denemeden denemeye değişir ve ortam
+ * kaydını gereksiz yere böler.
+ *
+ * Tavan: kanarya bir yükleme hatasından sonra gelmezse o denemede yüklenen
+ * dosyalar da kaybolur. Oturum isteme ulaşmadıysa deneme zaten ölçülmemiştir.
+ */
+export function memoryEntries(
+  log: string,
+  workdir: string,
+  hashes: ReadonlyMap<string, string>,
+): readonly string[] | undefined {
+  const events = log
+    .split('\n')
+    .map((line) => safeJson(line) as Record<string, unknown> | undefined)
+    .filter((event): event is Record<string, unknown> => event !== undefined)
+  if (!events.some((event) => event['hook_event_name'] === 'UserPromptSubmit')) return undefined
+
+  const root = resolve(workdir)
+  const entries = new Set<string>()
+  for (const event of events) {
+    if (event['hook_event_name'] !== 'InstructionsLoaded') continue
+    const path = event['file_path']
+    if (typeof path !== 'string') continue
+    const type = typeof event['memory_type'] === 'string' ? event['memory_type'] : 'Unknown'
+    const inside = within(root, path)
+    if (inside && event['load_reason'] !== 'session_start' && event['load_reason'] !== 'include') {
+      continue
+    }
+    const label = inside ? `./${toSlash(relative(root, path))}` : path
+    entries.add(`${type} ${label} ${hashes.get(path) ?? 'unreadable'}`)
+  }
+  return [...entries].sort()
+}
+
+const toSlash = (path: string) => path.split('\\').join('/')
+
+function within(root: string, path: string): boolean {
+  const rel = relative(root, resolve(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+function safeJson(line: string): unknown {
+  if (line.trim() === '') return undefined
+  try {
+    return JSON.parse(line) as unknown
+  } catch {
+    return undefined
   }
 }
 

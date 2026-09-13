@@ -9,6 +9,8 @@
 
 import {
   assayVersionLabel,
+  hostMemoryLabel,
+  memoryFromOutside,
   collisionPrefix,
   formatProportion,
   NO_SKILL,
@@ -149,6 +151,14 @@ export function renderRun(run: Run, summary: RunSummary): string {
   )
   // Kaydı hangi Assay sürümü yargıladı (0.3.2). Alan yoksa boş basılmıyor.
   out.push(style.grey(`assay ${assayVersionLabel(run)}`))
+  // Host'un bağlama yüklediği talimat dosyaları (0.4.5). Çalışma dizini
+  // dışından gelen bir dosya ölçülen bağlama sızmış demek: sarı.
+  const leaked = memoryFromOutside(run)
+  out.push(
+    leaked.length > 0
+      ? style.yellow(`host memory loaded from outside the working directory: ${leaked.join('; ')}`)
+      : style.grey(`host memory ${hostMemoryLabel(run)}`),
+  )
   /*
    * Eş zamanlılık gecikmenin koşulu.
    *

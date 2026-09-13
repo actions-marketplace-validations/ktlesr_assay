@@ -37,6 +37,7 @@ gözlemliyor ve raporluyor. Bu rapor o sınırı ölçüyor.
 | A1 | Kabul edilen | Dosya sistemi ve ağ sınırı host'un izin katmanına dayanıyor | ⚠️ açık, belgelendi |
 | A2 | Kabul edilen | Disk ve CPU kotası yok | ⚠️ açık, belgelendi |
 | A3 | Kabul edilen | Ölçülen ajan bu makinedeki süreçlere erişebiliyor | ⚠️ açık, 0.3.0-c'de sınırlandı |
+| H5 | Yüksek | Kullanıcının talimat dosyası (`~/.claude/CLAUDE.md`) ölçülen bağlama giriyordu | ✅ 0.4.5'te kapatıldı ve ölçülüyor |
 
 ---
 
@@ -151,6 +152,26 @@ ajana kopya veriliyor, koşum sonunda siliniyor. Pin 1'in içerik hash'i
 
 ---
 
+### H5 — Kullanıcının talimat dosyası ölçülen bağlama giriyordu (Yüksek)
+
+**Bulgu (2026-09-13).** Bu rapor "Host config: attempt başına ayrı
+`CLAUDE_CONFIG_DIR` ✅" diyordu ve bu, kullanıcının CLAUDE.md'sinin devrede
+olmadığı anlamında okunuyordu. Değildi: Claude Code çalışma dizininden köke kadar
+her dizinde talimat dosyası arıyor ve Windows'ta `%TEMP%` ev dizininin altında.
+`~/.claude/CLAUDE.md` her denemede bağlamdaydı; bir denemede ajan o dosyayı
+okuyup düzenlemeye kalktı (host'un izin katmanı durdurdu, dosya değişmedi — A1'in
+dayandığı katman).
+
+**Kapatma.** Üç katman (roadmap 0.4.5): çalışma dizini ev dışında; çalışma
+dizininin her üst dizinindeki talimat yerleri `claudeMdExcludes` ile dışlanıyor;
+yüklenen her dosya host'un `InstructionsLoaded` kancasıyla ölçülüp
+`environment.memory` olarak kayda ve ortam hash'ine giriyor. Ders:
+**ölçülmemiş izolasyon izolasyon değil.** Bu raporun kendi tablosu bir varsayımı
+✅ olarak işaretlemişti.
+
+**Kalan.** Yönetilen (policy) talimat dosyaları dışlanamıyor; ölçüm onları kayda
+yazıyor.
+
 ## Kabul edilen riskler
 
 Bunlar kapatılmadı. Kapatılmamış olmaları bir eksiklik değil, bilinçli bir
@@ -193,6 +214,7 @@ Rapor bunu ayrı bir başlık olarak sorguladı; sonuç temiz:
 |---|---|
 | Çalışma dizini | Attempt başına ayrı `mkdtemp`, sonunda siliniyor ✅ |
 | Host config | Attempt başına ayrı `CLAUDE_CONFIG_DIR` ✅ |
+| Host talimat dosyaları | **0.4.5'e kadar ❌** — çalışma dizininin üstündeki CLAUDE.md'ler yükleniyordu. Artık üst dizinler dışlanıyor ve yüklenen her dosya kayda yazılıyor ✅ (H5) |
 | Skill dizini | Koşum başına kopya, ajan kaynağa dokunamıyor ✅ (M2) |
 | Ortam değişkenleri | Allowlist, süreçler arası taşıma yok ✅ (H1) |
 | Koşum kaydı | Attempt'ler ayrı yazılıyor ✅ |

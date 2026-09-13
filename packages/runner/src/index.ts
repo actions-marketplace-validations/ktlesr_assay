@@ -17,6 +17,7 @@ export {
 
 export {
   createWorkspace,
+  workRoots,
   destroyWorkspace,
   snapshot,
   directoryHash,

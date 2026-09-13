@@ -3143,3 +3143,47 @@ modda koşulursa v3 tam matrisi de oradan gelir — aynı ölçüm iki kez
 ödenmez. Sitede o zamana kadar 60 denemelik hızlı koşum (912ad216) duruyor ve
 "fast mode" uyarısını taşıyor; ölçüm deposundaki rapor notu (`633f4b3`) iki
 koşumun farkını söylüyor.
+
+## 2026-09-13 — Host talimat dosyası sızıntısı: taşı, kes, ölç (0.4.5)
+
+Bağlam: Kullanıcının `~/.claude/CLAUDE.md`'si Windows'ta her denemenin bağlamına
+giriyordu. Adaptör temiz bir `CLAUDE_CONFIG_DIR` veriyor ve bunu izolasyon
+sayıyordu; host ise çalışma dizininden köke kadar her dizinde talimat arıyor ve
+`%TEMP%` ev dizininin altında. Kullanıcı üçünü birden istedi: çalışma dizini ev
+dışında, yetmezse taramayı başka türlü kes, ve her koşumda ölç — "ölçülmemiş
+izolasyon, izolasyon değil".
+Seçenekler (kesim): `CLAUDE_CODE_DISABLE_CLAUDE_MDS` (ikilide var) · `--safe-mode` ·
+`--bare` · `--setting-sources` · `claudeMdExcludes` ayarı
+(ölçüm): çalışma dizininin üst dizinlerini runner'da taramak (host'un kuralının
+modeli) · host'un `InstructionsLoaded` kancası (host'un kendi raporu) · API isteğini
+yakalamak (yalnızca sonda için; gerçek koşumda istek Anthropic'e gidiyor)
+Karar:
+- Kök: `%TEMP%` ev altındaysa Windows'ta `<sürücü>:\assay-work`, POSIX'te `/tmp`;
+  `ASSAY_WORK_ROOT` kullanıcının seçimi; oluşturulamazsa `%TEMP%`.
+- Kesim: `claudeMdExcludes` — çalışma dizininin her üst dizininde `CLAUDE.md`,
+  `CLAUDE.local.md`, `.claude/**`. `DISABLE_CLAUDE_MDS` fixture'ın kendi
+  CLAUDE.md'sini de kapatırdı; `--safe-mode` skill ve plugin'leri, `--bare` OAuth'u
+  kapatıyor; `--setting-sources` başka ayar dosyalarını da etkiliyor.
+- Ölçüm: `InstructionsLoaded` kancası + `UserPromptSubmit` kanaryası, günlük config
+  dizininde. Kanarya yoksa alan yazılmıyor ("ölçülmedi"); temiz oturumda `[]`.
+  Kayıtta `Environment.memory`: `<tür> <yol> sha256:<16>`, içerisi `./` göreli,
+  dışarısı mutlak. Ortam hash'ine yalnızca ölçüldüğünde giriyor.
+Gerekçe: Üç katman üç ayrı soruya cevap: taşımak sızıntının sebebini kaldırıyor,
+dışlama ev dışı bir kökün üstündeki dosyaları da kesiyor (`D:\CLAUDE.md`), ölçüm
+ikisinin de tuttuğunu her koşumda gösteriyor — ve tutmadığı gün kayda yazıyor.
+Runner'da üst dizinleri taramak host'un kuralını tahmin etmek olurdu; kural
+değişirse tahmin sessizce yanlış çıkar. Kanca host'un yüklediğini söylüyor. Kanarya,
+"hiçbir şey yüklenmedi" ile "kanca koşmadı"yı ayırıyor; o ayrım olmasa bu
+düzeltme, düzelttiği hatayı — izolasyonu varsaymayı — kayıt düzeyinde yeniden
+üretirdi. Kanarya olarak `SessionStart` denendi: akışta `hook_started` olayı
+bırakıyor ve izin görünmez değişkenlerini (0.2.0-f) kirletirdi; `UserPromptSubmit`
+akışa girmiyor ve stdout'u boş.
+Hash'e girmesinin bedeli: 0.4.5 kayıtları 0.4.4 ve öncesiyle karşılaştırılmıyor.
+Değişmez #2 gereği doğru cevap; eski kayıtlarda bağlama ne girdiği ölçülmedi.
+Doğrulama yöntemi ayrıca kayda değer: sahte API anahtarı ve yerel yakalayıcıya
+çevrilmiş `ANTHROPIC_BASE_URL` ile host'un gönderdiği istek **ücretsiz** okunabiliyor
+(host sistem istemini kuruyor, yerel sunucu 400 dönüyor). İlk deneme kimlik
+bilgisiz yapıldı ve hiçbir şey göstermedi: bellek, kimlik kontrolünden sonra
+yükleniyor. Araç: `tools/probe-host-memory.mjs`.
+Geri dönüş maliyeti: orta (ortam hash'inin tanımı genişledi; eski karşılaştırmalar
+durdu; çalışma kökü Windows'ta yer değiştirdi)

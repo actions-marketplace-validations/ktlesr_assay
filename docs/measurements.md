@@ -39,6 +39,13 @@ Her skill kendi plugin dizinine kuruldu
 `CLAUDE_CONFIG_DIR` açtığı için kullanıcının 119 skill'lik kurulumu devrede
 değil: her koşumda tek bir hedef skill aktif.
 
+**Düzeltme (2026-09-13).** Bu ölçümler kullanıcının `~/.claude/CLAUDE.md`'si
+bağlamdayken yapıldı: `CLAUDE_CONFIG_DIR` onu kesmiyordu, host çalışma
+dizininin üst dizinlerinde de talimat arıyor ve Windows'ta `%TEMP%` ev
+dizininin altında. Dosya tek bir ilgisiz talimat taşıyor (`/graphify`); bu
+sayfadaki kayıtlarda modelin metninde izi yok. 0.4.5'ten itibaren üst dizinler
+dışlanıyor ve yüklenen dosyalar ölçülüp kayda yazılıyor (roadmap 0.4.5).
+
 Hiçbir istemde skill adı geçmiyor. Ölçülen şey modelin istemden skill'i kendi
 seçmesi; komut çalıştırmak değil.
 

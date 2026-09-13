@@ -2,6 +2,7 @@ import {
   ACTIVATION_UNVERIFIED,
   activationUnverified,
   assayVersionLabel,
+  hostMemoryLabel,
   type Run,
 } from '@ktlsr/assay-core'
 
@@ -59,6 +60,9 @@ export function Pins({ run, drifted = [] }: { run: Run; drifted?: readonly strin
       label: 'Permission mode',
       value: run.permissionMode ?? 'not reported by the host',
     },
+    // Host'un yüklediği talimat dosyaları, ölçülmüş hâliyle (0.4.5). Ortam
+    // hash'inin içinde; ölçülmemiş bir kayıt "none" demez.
+    { key: 'memory', driftKey: 'environmentHash', label: 'Host memory', value: hostMemoryLabel(run) },
     { key: 'suiteVersion', driftKey: 'suiteVersion', label: 'Case set version', value: String(run.pins.suiteVersion) },
     { key: 'suiteHash', driftKey: 'suiteHash', label: 'Case set hash', value: run.pins.suiteHash },
     // Pin değil ama yargının koşulu: kaydı hangi Assay sürümü üretti (0.3.2).

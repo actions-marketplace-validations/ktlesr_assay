@@ -644,6 +644,27 @@ export interface Environment {
   skills: readonly string[]
   agents: readonly string[]
   plugins: readonly string[]
+  /**
+   * Host'un bağlama yüklediği talimat dosyaları (CLAUDE.md ve benzerleri) —
+   * **ölçülmüş** hâliyle (0.4.5).
+   *
+   * Her giriş `<tür> <yol> sha256:<ilk 16>`: çalışma dizini içindeki dosya
+   * `./` ile başlayan göreli yolla (suite'in fixture'ı), dışındaki mutlak
+   * yolla (sızıntı). İçerik hash'i girişte, çünkü aynı yoldaki dosya
+   * değişirse sistem istemi de değişir.
+   *
+   * Üç durum ayrı:
+   *  - alan yok → ölçülmedi (0.4.5 öncesi kayıt ya da host'un ölçüm kancası
+   *    o oturumda koşmadı). "Temiz" demek değil.
+   *  - `[]` → ölçüldü, hiçbir talimat dosyası yüklenmedi.
+   *  - dolu → ölçüldü, bunlar yüklendi.
+   *
+   * Ölçülmemiş izolasyon izolasyon değil: 0.4.5'e kadar adaptör kullanıcının
+   * `CLAUDE.md`'sinin yüklenmediğini varsayıyordu ve Windows'ta yükleniyordu.
+   * Alan hash'e yalnızca ölçüldüğünde giriyor; ölçülmemiş bir kayıtla ölçülmüş
+   * bir kayıt bu yüzden "ortam kaydı" olarak ayrışır ve karşılaştırılmaz.
+   */
+  memory?: readonly string[]
 }
 
 /** Ortamın iki koşum arasında kayan tek bir alanı. */
@@ -684,7 +705,51 @@ export function diffEnvironments(
       after: added.length > 0 ? `+${added.join(', +')}` : count(after.length),
     })
   }
+  // Talimat dosyaları: "ölçülmedi" bir liste değil, ayrı bir durum (0.4.5).
+  if (a.memory === undefined || b.memory === undefined) {
+    if (a.memory !== b.memory) {
+      changes.push({ field: 'memory', before: memoryText(a.memory), after: memoryText(b.memory) })
+    }
+  } else {
+    const before = [...a.memory].sort()
+    const after = [...b.memory].sort()
+    if (before.join('\u0000') !== after.join('\u0000')) {
+      const added = after.filter((x) => !before.includes(x))
+      const removed = before.filter((x) => !after.includes(x))
+      changes.push({
+        field: 'memory',
+        before: removed.length > 0 ? `-${removed.join(', -')}` : memoryText(before),
+        after: added.length > 0 ? `+${added.join(', +')}` : memoryText(after),
+      })
+    }
+  }
   return changes
+}
+
+const memoryText = (memory: readonly string[] | undefined) =>
+  memory === undefined ? 'not measured' : memory.length === 0 ? 'none loaded' : count(memory.length)
+
+/**
+ * Koşumda host'un yüklediği talimat dosyaları, raporda okunacak hâliyle.
+ *
+ * Terminal, HTML ve hosted sayfa aynı cümleyi kullanıyor. Ölçülmemiş bir
+ * kayıt "none" demez — ölçülmediğini söyler.
+ */
+export function hostMemoryLabel(run: Pick<Run, 'environment'>): string {
+  const memory = run.environment?.memory
+  if (memory === undefined) return 'not measured (the record predates 0.4.5 or the probe did not run)'
+  if (memory.length === 0) return 'none loaded (measured)'
+  return memory.join('; ')
+}
+
+/**
+ * Çalışma dizini dışından yüklenmiş talimat dosyası var mı.
+ *
+ * İçerideki dosya suite'in fixture'ı; dışarıdaki, ölçülen bağlama sızan
+ * host dosyası (0.4.5).
+ */
+export function memoryFromOutside(run: Pick<Run, 'environment'>): readonly string[] {
+  return (run.environment?.memory ?? []).filter((entry) => !/^\S+ \.\//.test(entry))
 }
 
 /** `1 entry` / `2 entries` — rapor metni dilbilgisine takılmasın. */

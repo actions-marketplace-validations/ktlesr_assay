@@ -82,6 +82,14 @@ The Claude Code adapter needs `CLAUDE_CODE_OAUTH_TOKEN` (produced by
 `claude setup-token`) or `ANTHROPIC_API_KEY`: every run executes in an
 isolated config directory, so it does not inherit your interactive session.
 
+A fresh config directory does not keep your own `CLAUDE.md` out on its own:
+Claude Code also reads instruction files in every directory above the working
+directory, and on Windows the temp directory sits under your home. Up to 0.4.4
+every Windows run loaded `~/.claude/CLAUDE.md` into the measured context. Since
+0.4.5 the working directory is opened outside your home, instruction files above
+it are excluded, and the files the host actually loaded are **measured and
+recorded** (`environment.memory`, shown as "host memory" in every report).
+
 CLI details: [packages/cli/README.md](packages/cli/README.md).
 
 ### GitHub Action

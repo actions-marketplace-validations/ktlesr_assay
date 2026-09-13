@@ -25,6 +25,8 @@ export {
 
 export {
   assayVersionLabel,
+  hostMemoryLabel,
+  memoryFromOutside,
   activationUnverified,
   ACTIVATION_UNVERIFIED,
   PRE_VERSION_STAMP,

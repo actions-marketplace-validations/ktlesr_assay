@@ -37,6 +37,19 @@ decision, an unisolated probe had 119 skills active, the target skill never
 fired on natural language, and the model reached for a neighbour's tool
 instead. Isolated, the same probe saw 19.
 
+The config directory alone does not keep instruction files out. Claude Code
+reads `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/` and `CLAUDE.local.md` in
+the working directory and in every directory above it, and on Windows the temp
+directory is under the user's home — so up to 0.4.4 `~/.claude/CLAUDE.md` was in
+every measured context. Since 0.4.5 the adapter writes `claudeMdExcludes` for
+every directory above the working directory (the working directory's own
+`CLAUDE.md` is the suite's fixture and stays), and the runner opens working
+directories outside the home directory. It also **measures** what was loaded:
+the host reports each file to an `InstructionsLoaded` hook, a `UserPromptSubmit`
+canary proves the hook ran, and the result is recorded as `environment.memory`
+— absent means not measured, `[]` means measured and clean. It is part of the
+environment hash.
+
 The child process does not inherit the parent environment. A short allowlist is
 passed through — `PATH`, home and temp, locale and timezone, proxy settings —
 plus the credential. Anything not on the list is absent, so a `GITHUB_TOKEN` in
