@@ -740,6 +740,33 @@ yakaladı. Kök düzeltmesi ve dışlama ayrı ayrı da tutuyor.
 
 ---
 
+## Temiz koşum ortamı — planlandı, onay bekliyor
+
+Kendi ölçümlerim için kontrollü bir ortam; hosted ürün değil. Plan:
+[runner-environment.md](runner-environment.md). Ayrı bir VPS, deneme başına
+konteyner, gerçek Anthropic anahtarını yalnızca bir kimlik proxy'si tutuyor
+(deneme konteyneri sahte anahtarla proxy'ye konuşuyor ve dışa başka çıkışı yok).
+Tetik CLI'dan (ssh), sonuçlar mevcut `assay push` yolundan ve `rsync` ile.
+Makinenin ölçüme karıştığı yerlerin hepsini kapatıyor: CLAUDE.md, `%TEMP%`,
+`System32`, Git Bash, yetimler, ajanın runner'ı öldürmesi, port çakışması, kotasızlık.
+
+| Adım | Çıktı | İş | Durum |
+|---|---|---|---|
+| K0 Varsayımları ölç | Claude Code'un dış adresleri, proxy'den SSE, kök olmayan kullanıcı, imajda talimat yok — ücretsiz | S | bekliyor |
+| K1 Deneme imajı | Pinli Claude Code, uid 1000, boş HOME, talimat denetimi | M | bekliyor |
+| K2 Konteyner worker'ı | `superviseAttempt` konteynerde; kayda `platform` + imaj özeti | M–L | bekliyor |
+| K3 Kimlik proxy'si | Anahtar enjeksiyonu, tek upstream, koşum başına sayaç/tavan | M | bekliyor |
+| K4 Sunucu | Ayrı VPS, sırlar, kalıcı disk | S | bekliyor — sağlayıcı/boyut kullanıcıda |
+| K5 Tetik ve doğrulama | `assay-remote`; bilinen bir suite'i sunucuda koşup karşılaştırmak | S–M | bekliyor — ~$5–10, onay |
+| K6 Belgeler | sandbox-security A1/A2/A3 yeniden | S | bekliyor |
+
+~5–6 gün kod, ~$5–10 doğrulama, ayda ~€7–17 sunucu; ölçüm başına API maliyeti
+deneme başına ~$0.05 (tetiklenme) – ~$0.09 (tamamlama). Açık kararlar planın
+sonunda: API anahtarı mı OAuth mu, sunucu, konteynerde `bypassPermissions`,
+gerçek pin 3, hangi taban çizgileri yeniden kurulacak.
+
+---
+
 ## Sonraki dalga
 
 Faz 3'ten sonra değerlendirilecek. **Şimdi yapılmayacak.**

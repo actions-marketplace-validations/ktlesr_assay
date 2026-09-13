@@ -3214,3 +3214,24 @@ kalmış kayıtlara künyede not düş, yeniden ölçme.
   11 koşumun 11'i içinde). Metodoloji sayfasının verisiyle aynı disiplin.
 - Doğrulama: 3 birim ters çevirme (web typecheck kapılı) ve bileşen düzeyinde bir
   canlı ters çevirme; hepsi kırmızı. Açık/koyu × 1280/375'te taşma yok.
+
+## 2026-09-13 — Temiz koşum ortamı planlandı (öneriler, uygulanmadı)
+
+Bağlam: Makine ölçüme altı yerden karıştı (CLAUDE.md, `%TEMP%`, `System32`, Git
+Bash, yetimler, runner'ın öldürülmesi). Kullanıcı kendi ölçümleri için kontrollü bir
+ortamın planını istedi; hosted ürün, kota ve yabancı kullanıcı kapsam dışı. Token
+sunucuda durmalı (kullanıcının güvenlik kararı).
+Seçenekler: yalnız VPS · yalnız dizüstünde konteyner · koşum başına konteyner ·
+VPS + deneme başına konteyner · microVM
+Öneri: ayrı VPS + deneme başına konteyner; kimlik proxy'si gerçek anahtarı tutuyor,
+deneme konteyneri sahte anahtarla ona konuşuyor ve iç ağda başka çıkışı yok; tetik
+CLI (ssh), sonuç mevcut `assay push` + `rsync`; API anahtarı (ayrı workspace, tavan).
+Gerekçe: Tabloda tek seçenek bütün arızaları birlikte kapatıyor. Proxy, token'ı
+ölçülen koddan (ajanın `Bash`'i ortamı devralıyor) tamamen uzaklaştırıyor ve ağın
+"gözleniyor"unu "engelleniyor"a çeviriyor. Mevcut Dokploy VPS'i reddedildi:
+production verisiyle çekirdek ve ağ paylaşmak, ölçüm ortamının bir kaçışını
+production'ın kaçışı yapar. Mimari mevcut koda oturuyor: 0.3.0-c'nin worker'ı
+`spawn` yerine `docker run` ile başlıyor, sonuç dosyası sözleşmesi değişmiyor.
+Ayrıntı, maliyet, riskler, sıra: `docs/runner-environment.md`. Kararlar kullanıcının
+onayına kadar öneri.
+Geri dönüş maliyeti: düşük (yalnız plan)
