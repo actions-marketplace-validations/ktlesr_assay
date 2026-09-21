@@ -1,7 +1,8 @@
 # Contributing
 
-Thanks for looking. Assay is early: the SDK works end to end on Claude Code,
-the hosted layer does not exist yet.
+Thanks for looking. Assay is early, but both halves exist: the SDK runs end to
+end on Claude Code, and the hosted layer is deployed at
+[assayctl.dev](https://assayctl.dev). One host adapter is supported today.
 
 ## Getting set up
 
@@ -46,9 +47,15 @@ rules actually catch violations.
 
 ## Language
 
-Code comments, `docs/` and commit messages are Turkish. Every user-facing
-string — validation errors, CLI output, reports — is English. See
-`docs/decisions.md`.
+English: everything that faces outward. User-facing strings (validation
+errors, CLI output, reports), the root `README.md`, the package READMEs, the
+action README, this file, and commit messages.
+
+Turkish: code comments and the working notes under `docs/`. They are the
+maintainer's notebook, not product documentation. Links into them from
+outward-facing pages are marked `(Turkish)` so nobody clicks in blind.
+
+See `docs/decisions.md` (Turkish) for why the split exists.
 
 ## Before you push
 

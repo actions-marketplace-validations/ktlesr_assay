@@ -1,5 +1,403 @@
 # @ktlsr/assay-runner
 
+## 0.4.6
+
+### Patch Changes
+
+- 15068ec: Attempts can now run in containers: `assay run --container <image> --container-api <name:port>`.
+  
+  Each attempt gets its own container on an internal Docker network. The only way
+  out is an egress proxy that the runner starts from the same image; it admits the
+  npm registry and Playwright's CDNs on 443 and nothing else. The Anthropic API is
+  reached through a credential proxy container you name with `--container-api`;
+  the attempt container only ever sees a placeholder key, never your credentials.
+  Assay's own code is mounted from the machine that runs the CLI, so the container
+  never measures with an older Assay than the one you are running. The image is in
+  `tools/runner-env` (Node 22.20, Claude Code 2.1.270, Playwright's Chromium, uid
+  1000, a build step that fails on any instruction file).
+  
+  The image digest, platform, egress allowlist and limits are written to
+  `environment.container` and folded into the environment hash. Container runs
+  therefore do not compare with runs on your machine; `assay compare` names the
+  container as the changed condition. Runs without `--container` are unchanged and
+  keep comparing with earlier records.
+  
+  Also:
+  - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` now reaches the host session when
+    you set it (it was dropped by the environment allowlist).
+  - A suite given by bare file name (`assay run x.suite.yaml`) now finds its
+    fixtures; the fixture path used to be resolved against the file name itself
+    and every attempt with fixtures came out `unknown`.
+- Updated dependencies [15068ec]
+  - @ktlsr/assay-core@0.4.6
+
+## 0.4.5
+
+### Patch Changes
+
+- 145e9c4: Your own `CLAUDE.md` no longer enters the measured context, and every run now
+  records which instruction files the host loaded.
+  
+  A fresh `CLAUDE_CONFIG_DIR` was taken to isolate each run. It does not keep
+  instruction files out: Claude Code also reads `CLAUDE.md`, `.claude/CLAUDE.md`,
+  `.claude/rules/` and `CLAUDE.local.md` in every directory above the working
+  directory, and on Windows the temp directory sits under the home directory. Up
+  to 0.4.4 every Windows run loaded `~/.claude/CLAUDE.md`.
+  
+  - The working directory is opened outside the home directory: on Windows under
+    `<drive>:\assay-work` when `%TEMP%` is inside the home, on POSIX under `/tmp`.
+    `ASSAY_WORK_ROOT` chooses it.
+  - Instruction files in every directory above the working directory are excluded
+    (`claudeMdExcludes`). The working directory's own `CLAUDE.md` is the suite's
+    fixture and still loads.
+  - What the host actually loaded is measured through its `InstructionsLoaded`
+    hook and recorded as `environment.memory`: absent means not measured, `[]`
+    means measured and clean. Every report shows it as "host memory"; the terminal
+    prints a file loaded from outside the working directory in yellow.
+  
+  Behaviour change: `memory` is part of the environment hash, so a 0.4.5 run does
+  not compare with a run recorded by 0.4.4 or earlier (`memory: not measured →
+  none loaded`). What entered the context of those runs was never measured.
+- Updated dependencies [145e9c4]
+  - @ktlsr/assay-core@0.4.5
+
+## 0.4.4
+
+### Patch Changes
+
+- 4e6269f: `compare` now names only what stopped the comparison. When a pin changed and
+  another pin could not be read, the reason used to list both in one sentence
+  ("suiteHash changed; systemPromptHash could not be read"), so it was unclear
+  which one blocked. The reason now carries the change; the unreadable pin moves
+  to `RunComparison.note` and prints on its own `also:` line. An unreadable pin
+  with no change beside it is still the reason, and still stops the comparison.
+- Updated dependencies [4e6269f]
+  - @ktlsr/assay-core@0.4.4
+
+## 0.4.3
+
+### Patch Changes
+
+- f728b9f: `--fast` no longer skips a case whose only claim is an expected winner.
+  
+  Fast mode measures the trigger layer and skips cases that only declare
+  assertions. Its test for "has a trigger claim" predates `expect.winner`
+  (0.4.0), so a case carrying nothing but `winner:` — a contested case,
+  `winner: [copywriting, copy-editing]` — was skipped and recorded as "the case
+  only declares assertions", which was false. Found on a real collision run:
+  one of twenty cases went unmeasured. Such cases now run and are judged by
+  the winner rule.
+- Updated dependencies [f728b9f]
+  - @ktlsr/assay-core@0.4.3
+
+## 0.4.2
+
+### Patch Changes
+
+- 22c1f72: `assay push` tells a failed upload apart from a mistyped command, and says
+  when the run it just uploaded is not visible to anyone else yet.
+  
+  - **Exit code 4** when the upload did not happen: the server could not be
+    reached or refused the record. It used to be 2, the usage-error code, which
+    sent CI users looking at their command line instead of at the server.
+    **Behaviour change:** a pipeline that treated 2 from `push` as "the server
+    said no" should now look for 4.
+  - After a successful upload to a case set that has not been published yet,
+    push prints that only you can open the link until an administrator
+    publishes it. The hosted side now reports whether the case set is public.
+  - `assay --version` prints the version, the same value a record carries as
+    `assayVersion`.
+- Updated dependencies [22c1f72]
+  - @ktlsr/assay-core@0.4.2
+
+## 0.4.1
+
+### Patch Changes
+
+- e2c39b5: Masking now catches the username in the three forms real records carried
+  past `assay scrub`, and `push` checks a record before it leaves the machine.
+  
+  - A path whose backslashes a shell swallowed (`C:UsersadaAppData…`), the
+    Claude Code project directory name (`C--Users-ada`) and a path escaped twice
+    inside code the agent wrote (`C:\\Users\\ada`) are masked. On the eight
+    records from the first real upload, 0.4.0 left the username in 71 places;
+    this release leaves none, with or without knowing the name.
+  - The account running Assay is also masked by name, wherever a path carries
+    it, when a record is written, read, scrubbed or pushed. This closes the
+    cases a pattern cannot see, such as a name with a dot.
+  - `push` refuses to upload a record that still carries a secret, a home path
+    or this account's name after masking, and names where. `--allow-unmasked`
+    uploads anyway, once you have checked. When masking changed the uploaded
+    copy, `push` says how many places and that the file on disk is unchanged.
+- Updated dependencies [74fa395]
+- Updated dependencies [e2c39b5]
+  - @ktlsr/assay-core@0.4.1
+
+## 0.4.0
+
+### Minor Changes
+
+- 7c81b0f: Collision suites: say which skill should win, and see who did.
+  
+  A suite has one `target.skill`, and until now a collision case, one aimed at a
+  different co-installed skill, could only list the skills that must *not*
+  fire. A run where nothing fires satisfies that. Measured on a real
+  200-attempt collision run: Assay reported 179 pass / 21 fail while 7 of 13
+  skills never fired on their own cases, and 100 positive attempts in which no
+  skill fired were scored as pass.
+  
+  - **`expect.winner`**: `winner: <skill>` means that skill should be the first
+    confirmed activation; `winner: [a, b]` passes if either is first (a contested
+    case); `winner: none` means no active skill should fire, and counts as a
+    negative for the "every trigger suite needs a negative case" rule.
+  - **Nothing fired is a fail, not unknown.** The signal was read and the
+    expected skill did not fire; that is a measurement. A different skill firing
+    first is also a fail, and the reason names who won. Unknown is kept for runs
+    where the result genuinely cannot be known.
+  - **Collision matrix** in the terminal and HTML reports: expected winner ×
+    first skill to fire, with each row's win rate given with N and a 95%
+    interval. It sits above the trigger accuracy, which is now labelled
+    "target only".
+  - **Case ids accept hyphens** (`collide.copy-editing.tighten`), and an invalid
+    id says which character is the problem.
+  - A case that only lists `not_triggered` gets a warning that it also passes
+    when no skill fires.
+  
+  Existing suites keep working unchanged apart from that warning. Re-scored with
+  the new schema, the real run above becomes 79 pass / 121 fail, and its matrix
+  matches the hand-built analysis cell for cell.
+
+### Patch Changes
+
+- Updated dependencies [7c81b0f]
+  - @ktlsr/assay-core@0.4.0
+
+## 0.3.2
+
+### Patch Changes
+
+- 07cc12a: A run record now carries the Assay version that produced it.
+  
+  The meaning of a verdict has changed between releases: 0.2.0 counted a refused
+  skill activation as a trigger, and 0.3.0 could recover an incomplete record as
+  a pass. A record that does not say which version judged it cannot say which
+  rules it was judged by.
+  
+  `Run.assayVersion` is the runner package's version, read from its own
+  `package.json`. A recovered record carries the version that wrote the journal,
+  not the one that recovered it — the attempts were judged by the writer's rules.
+  
+  Records written before this release have no version. They are not guessed at
+  and not backfilled; the terminal report, the HTML report and the hosted run
+  page read them as `0.3.1 or earlier (the record predates version stamping)`
+  instead of leaving the field blank. Library callers can get the same wording
+  from `assayVersionLabel(run)` in `@ktlsr/assay-core`.
+- Updated dependencies [07cc12a]
+  - @ktlsr/assay-core@0.3.2
+
+## 0.3.1
+
+### Patch Changes
+
+- 3570a5f: A recovered run cannot pass, and it names the cases it never reached.
+  
+  Measured on 0.3.0: a run killed after three attempts was recovered as a
+  `pass` holding only its first, positive case. The negative case it never
+  reached appeared nowhere in the record — neither among the cases nor among
+  the skipped ones — so a run cut before its negatives left a clean pass that
+  did not say what it was missing.
+  
+  The journal header now carries the planned case list, and `assay recover`
+  writes every case the run never started into `skipped` with
+  `cause: 'interrupted'`. An incomplete record's verdict is at best `unknown`,
+  even when no case was missed entirely and only attempts were: the unrun
+  attempts were never measured. A failure the record did measure is still a
+  failure. The terminal and HTML reports say why the record cannot pass.
+  
+  Journals written by 0.3.0 have no planned list. Recovering one cannot name
+  the unreached cases, but the record still does not pass.
+  
+  **Behaviour change:** records recovered as `pass` before this release would
+  now be `unknown`. Records already stored or uploaded keep their verdict; the
+  rule applies to new recoveries.
+- Updated dependencies [3570a5f]
+  - @ktlsr/assay-core@0.3.1
+
+## 0.3.0
+
+### Minor Changes
+
+- d21e4e7: Comparison now names the field that actually moved. When two runs differ in
+  their environment, `compare` reported "systemPromptHash changed" — a field
+  that reads `not-provided-by-host` in both records and therefore never moved.
+  The auditor's finding was filed under the audited pin's name.
+  
+  `comparePins` now reports `environmentHash`, and the run record carries the
+  environment behind that hash (model, version, output style, permission mode,
+  tool/skill/agent/plugin lists) so the reason can say
+  `permissionMode: acceptEdits → bypassPermissions` instead of only "something
+  changed". Records written before this release have no environment components;
+  those comparisons fall back to hash level and say so.
+  
+  No verdict changes: the same comparisons are refused as before, with the
+  right reason.
+- 98651e0: Each attempt now runs in its own process, so an attempt that gets killed costs
+  an attempt instead of the run.
+  
+  The agent being measured verifies its work by starting dev servers and then
+  killing processes by port. The runner is an ordinary node process on the same
+  machine, and during a 240-attempt measurement it was killed twice that way.
+  Part of that was our own doing: the adapter killed only its direct child, so
+  the servers the agent started outlived the attempt and the next agent found the
+  port busy.
+  
+  `assay run` now supervises each attempt in a short-lived worker and closes that
+  worker together with its process tree when the attempt ends. A killed attempt
+  is recorded as `unknown` — not `fail`, because nothing was measured — with a
+  reason that names what happened. `--no-isolation` runs attempts in the calling
+  process as before; library callers that pass their own adapter instance keep
+  the in-process default.
+  
+  Measured, with real processes and a real killer: in-process, one kill ends the
+  run and records nothing; isolated, the same kills cost two attempts out of four
+  and the run finishes. No orphan servers were left behind in either arm.
+  
+  This is a limit, not a shield. The supervising process is a node process too,
+  and killing it still stops the run — the journal then holds the completed
+  attempts and `assay recover` turns them into a record. Real isolation needs a
+  container and stays in Phase 3.
+- b3c7e12: A killed run no longer loses the attempts it already measured.
+  
+  Until now the record was written once, after every case finished, so a process
+  killed mid-run took every completed attempt with it. That is not theoretical:
+  during a 240-attempt measurement the runner was killed twice by the agent it
+  was measuring, and ~40 minutes and ~$4 of attempts went with it.
+  
+  Each attempt is now appended to `.assay/runs/<run-id>.partial.jsonl` as it
+  completes. A run that finishes normally folds the journal into the usual record
+  and deletes it. A run that dies leaves the journal on disk, and the new `assay
+  recover` turns it into a record — one that says it is incomplete, carrying the
+  reason, the recovery time, and the count of any journal lines too damaged to
+  read. `assay run` warns when it finds a journal from an earlier run.
+  
+  The loss is now capped at one attempt. The runner is still killable; making it
+  survive is a separate change.
+- bae696c: `--concurrency <n>` runs attempts in parallel. The default stays 1.
+  
+  A 240-attempt measurement took eight hours because attempts ran one at a time.
+  They can now share the machine, but speeding up is a choice rather than a
+  default: parallel attempts compete for CPU, memory, ports and the host's rate
+  limit, and a default that quietly changed the conditions of a measurement would
+  be the wrong kind of help.
+  
+  The value is written to the run record and deliberately kept out of the
+  environment hash. The hash records the environment the host reported; how many
+  attempts ran at once is a property of the run, not of the host, and folding it
+  in would make runs at different speeds incomparable on trigger accuracy too.
+  What it does affect is latency and cost, so the report says so whenever
+  concurrency is above one.
+  
+  Each worker gets a disjoint port range, passed to the agent as `PORT`,
+  `VITE_PORT` and `ASSAY_PORT_RANGE`. This is a mitigation, not a guarantee: an
+  agent is free to ignore them, and a server with a hardcoded port will still
+  collide with its neighbour.
+  
+  Records written before this release have no concurrency field, which means one.
+- 468da43: `--fast` measures one layer and says so.
+  
+  Three attempts per case and the trigger layer only. It
+  answers "does this skill still fire" in minutes instead of hours, which is the
+  question a pull request asks. It is early warning, not evidence, and the report
+  leads with that: at three attempts the interval is wide enough that the run can
+  show a break but not a regression.
+  
+  The record declares its own scope. `Run.layers` names the layers that were
+  measured; declared assertions that were not evaluated are listed in
+  `Attempt.notEvaluated` rather than counted as `unknown`, because `unknown` means
+  "we looked and got no signal" and nobody looked here. Cases that only declare
+  assertions are not run at all and appear in `Run.skipped` with the reason — a
+  case that never ran is not a case with N=0.
+  
+  `--max-attempts <n>` caps the total attempts on any run, fast or not. Cases past
+  the cap are named in the record instead of being silently trimmed, and **a run
+  the cap cut short cannot pass**: at best it is `unknown`, and `assay ci` exits 3.
+  Measured on a real host before this rule existed, a cap of 3 cut every negative
+  case and the run passed on positives alone. A failure the run did measure still
+  counts. Fast mode sets no cap of its own — the cost ceiling is yours to choose.
+  
+  `--repeat` still wins when both are given: fast mode is a shortcut, not a lock.
+  No default changes — repeat, permission mode and concurrency are what they were.
+  
+  The GitHub Action gains a `fast` input, defaulting to false.
+
+### Patch Changes
+
+- Updated dependencies [d21e4e7]
+- Updated dependencies [98651e0]
+- Updated dependencies [b3c7e12]
+- Updated dependencies [bae696c]
+- Updated dependencies [468da43]
+  - @ktlsr/assay-core@0.3.0
+
+## 0.2.0
+
+### Minor Changes
+
+- f8b2d63: Trigger accuracy now measures **activation**, not the `Skill` call.
+  
+  **BREAKING BEHAVIOUR CHANGE — refused activations are no longer counted as
+  triggers, and this changes the numbers of runs you have already recorded.**
+  
+  Until 0.2.0 a `Skill` tool call was reported as a trigger the moment it
+  appeared in the stream. Whether the host actually loaded the skill was never
+  checked. In a pilot run, four recorded triggers turned out to be four refused
+  activations — nothing had run — and the report still said `precision 100%`.
+  
+  A `Skill` call now counts as a trigger only when its matching `tool_result`
+  came back without an error and carried the skill body. A call that was denied,
+  failed, returned an empty body, or never produced a result is a **refusal**:
+  neither `pass` nor `fail`, but `unknown`, in every layer that reads it.
+  
+  What changes for you:
+  
+  - Positive cases whose activation was refused move from `fail` to `unknown`.
+    They were never a skill defect; the permission layer stopped them.
+  - Negative cases whose activation was refused move from `pass` to `unknown`.
+    This is the more dangerous direction that was being hidden: the model *did*
+    reach for the skill and the report said it did not trigger.
+  - `precision`, `recall` and the discrimination note drop those attempts from
+    the denominator instead of counting them as observations, so a run whose
+    activations were all refused now reports "not measurable" instead of 100%.
+  - CI exit codes shift accordingly: affected runs move from `1` to `3`
+    ("nothing could be measured"). Use `--allow-unknown` if that must not fail
+    the pipeline while you fix the permission mode.
+  
+  Also in this release:
+  
+  - `--permission-mode` is now settable on `assay run` and `assay ci`. The
+    default is unchanged (`acceptEdits`); it was hardcoded before, and a skill
+    that declares `allowed-tools` cannot activate under that mode at all. The
+    mode the host reports is written to the run record, shown in the terminal
+    and HTML report, and folded into the environment hash — a skill measured
+    with restricted tools and the same skill measured without them are two
+    different measurements. Because the hash definition changed, runs recorded
+    before 0.2.0 compare against newer runs as environment-drifted and produce
+    `unknown` rather than a false verdict. `bypassPermissions` additionally
+    requires `--allow-bypass-permissions`.
+  - `result.permission_denials` is read. The host had been reporting denied tool
+    calls all along; the parser ignored them. Denied calls now carry a
+    `refusal` on the trace event, so "the skill could not do it" and "Assay did
+    not allow it" stop looking the same.
+  - `system/hook_started` and `system/hook_response` are parsed into the trace
+    as `hook` events with name, event, phase, exit code, outcome, stdout and
+    stderr. Hooks change what the agent sees and can block its tool calls; a
+    run record that omits them cannot explain the difference between two runs.
+
+### Patch Changes
+
+- Updated dependencies [f8b2d63]
+  - @ktlsr/assay-core@0.2.0
+
 ## 0.1.3
 
 ### Patch Changes

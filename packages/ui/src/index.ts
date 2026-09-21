@@ -30,6 +30,7 @@ export {
 
 export {
   Badge,
+  BreakableName,
   Callout,
   Determination,
   EmptyState,
@@ -48,6 +49,7 @@ export {
   IconCall,
   IconClose,
   IconEnd,
+  IconHook,
   IconFail,
   IconInfo,
   IconMessage,

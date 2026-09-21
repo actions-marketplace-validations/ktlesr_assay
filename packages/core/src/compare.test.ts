@@ -132,3 +132,118 @@ describe('compareRuns — regresyon tespiti', () => {
     expect(comparison.verdict).toBe('fail')
   })
 })
+
+/**
+ * 0.3.0-a — gerekçe doğru adresi göstersin.
+ *
+ * Gerçek koşumda görülen kusur: çapraz izin modu karşılaştırması doğru şekilde
+ * reddedildi (exit 3) ama "systemPromptHash changed" dedi. O alan iki kayıtta
+ * da `not-provided-by-host` idi; kayan şey `environmentHash` ve içinde
+ * `permissionMode` idi.
+ */
+describe('compareRuns — kayan alanın adı', () => {
+  const blind: Pins = { ...pins, systemPromptHash: 'not-provided-by-host' }
+
+  const withEnvironment = (
+    hash: string,
+    permissionMode: string,
+    cases: ReadonlyArray<[string, number, number]> = [['a', 10, 0]],
+  ): Run => ({
+    ...run(cases, { ...blind, environmentHash: hash }),
+    environment: {
+      model: 'claude-haiku-4-5-20251001',
+      version: '2.1.263',
+      permissionMode,
+      tools: ['Bash', 'Read', 'Write'],
+      skills: ['impeccable'],
+      agents: [],
+      plugins: ['impeccable@4.2.2'],
+    },
+  })
+
+  it('ortam kayınca gerekçe systemPromptHash i suçlamaz', () => {
+    const comparison = compareRuns(
+      withEnvironment('sha256:env-a', 'acceptEdits'),
+      withEnvironment('sha256:env-b', 'bypassPermissions'),
+    )
+    expect(comparison.comparable).toBe(false)
+    expect(comparison.reason).not.toContain('systemPromptHash')
+    expect(comparison.reason).toContain('environmentHash')
+  })
+
+  it('hash in icinde kayan alani adiyla soyler', () => {
+    const comparison = compareRuns(
+      withEnvironment('sha256:env-a', 'acceptEdits'),
+      withEnvironment('sha256:env-b', 'bypassPermissions'),
+    )
+    expect(comparison.environmentChanges).toEqual([
+      { field: 'permissionMode', before: 'acceptEdits', after: 'bypassPermissions' },
+    ])
+    expect(comparison.reason).toContain('permissionMode: acceptEdits → bypassPermissions')
+  })
+
+  /**
+   * 0.3.0-a öncesi kayıtlarda ortam bileşenleri yok. O zaman hash düzeyinde
+   * konuşulur — uydurulmaz, susulur.
+   */
+  it('bir tarafta ortam kaydi yoksa hash duzeyinde konusur', () => {
+    const before = run([['a', 10, 0]], { ...blind, environmentHash: 'sha256:env-a' })
+    const comparison = compareRuns(before, withEnvironment('sha256:env-b', 'acceptEdits'))
+    expect(comparison.comparable).toBe(false)
+    expect(comparison.environmentChanges).toEqual([])
+    expect(comparison.reason).toContain('environmentHash changed between them')
+    expect(comparison.reason).not.toContain('permissionMode')
+  })
+
+  it('liste alanlari eklenen ve cikarilan olarak yazilir', () => {
+    const a = withEnvironment('sha256:env-a', 'acceptEdits')
+    const b = withEnvironment('sha256:env-b', 'acceptEdits')
+    const comparison = compareRuns(a, {
+      ...b,
+      environment: { ...b.environment!, skills: ['impeccable', 'pdf'] },
+    })
+    expect(comparison.environmentChanges).toEqual([
+      { field: 'skills', before: '1 entry', after: '+pdf' },
+    ])
+  })
+
+  it('ortam esitse karsilastirma acilir ve degisiklik listesi bos', () => {
+    const comparison = compareRuns(
+      withEnvironment('sha256:env-a', 'acceptEdits'),
+      withEnvironment('sha256:env-a', 'acceptEdits', [['a', 9, 1]]),
+    )
+    expect(comparison.comparable).toBe(true)
+    expect(comparison.environmentChanges).toEqual([])
+  })
+})
+
+/**
+ * Durduran sebep önde, okunamayan pin ayrı notta. Üretimdeki cümle ikisini
+ * aynı cümlede veriyordu ("suiteHash changed; systemPromptHash could not be
+ * read") ve hangisinin karşılaştırmayı durdurduğu okunmuyordu.
+ */
+describe('compareRuns — durduran sebep ve not', () => {
+  const blind: Partial<Pins> = { systemPromptHash: 'not-provided-by-host' }
+
+  it('kayma varken okunamayan pin gerekceye degil nota gider', () => {
+    const comparison = compareRuns(
+      run([['a', 10, 0]], blind),
+      run([['a', 10, 0]], { ...blind, suiteHash: 'sha256:suite2' }),
+    )
+    expect(comparison.reason).toBe('the runs are not comparable: suiteHash changed between them')
+    expect(comparison.note).toContain('systemPromptHash could not be read')
+    expect(comparison.unavailable).toEqual(['systemPromptHash'])
+  })
+
+  it('kayma yoksa okunamayan pin durduran sebeptir, not yok', () => {
+    const comparison = compareRuns(run([['a', 10, 0]], blind), run([['a', 10, 0]], blind))
+    expect(comparison.comparable).toBe(false)
+    expect(comparison.reason).toContain('systemPromptHash could not be read')
+    expect(comparison.note).toBeUndefined()
+  })
+
+  it('yalnizca kayma varsa not yok', () => {
+    const comparison = compareRuns(run([['a', 10, 0]]), run([['a', 10, 0]], { model: 'model-2' }))
+    expect(comparison.note).toBeUndefined()
+  })
+})

@@ -1,7 +1,15 @@
 'use client'
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { IconCall, IconEnd, IconMessage, IconResult, IconSkill, IconSort } from './icons'
+import {
+  IconCall,
+  IconEnd,
+  IconHook,
+  IconMessage,
+  IconResult,
+  IconSkill,
+  IconSort,
+} from './icons'
 import { Badge, type VerdictKind } from './measurement'
 
 /**
@@ -142,7 +150,12 @@ export function Table<Row>({
 export interface TraceStep {
   seq: number
   kind:
-    'tool_call' | 'tool_result' | 'assistant_message' | 'skill_trigger' | 'session_end'
+    | 'tool_call'
+    | 'tool_result'
+    | 'assistant_message'
+    | 'skill_trigger'
+    | 'session_end'
+    | 'hook'
   tool?: string | undefined
   skill?: string | undefined
   text?: string | undefined
@@ -150,6 +163,10 @@ export interface TraceStep {
   isError?: boolean | undefined
   outcome?: string | undefined
   args?: Record<string, unknown> | undefined
+  /** İzin katmanı çağrıyı reddettiyse sebebi. Hata ile aynı şey değil. */
+  refusal?: string | undefined
+  /** `hook` adımında host'un çalıştırdığı kancanın adı. */
+  hook?: string | undefined
 }
 
 const KIND_GLYPH: Record<TraceStep['kind'], typeof IconCall> = {
@@ -158,6 +175,7 @@ const KIND_GLYPH: Record<TraceStep['kind'], typeof IconCall> = {
   assistant_message: IconMessage,
   skill_trigger: IconSkill,
   session_end: IconEnd,
+  hook: IconHook,
 }
 
 /**
@@ -201,14 +219,21 @@ export function TraceViewer({
             </span>
             <span
               className="truncate text-text-muted"
-              title={step.tool ?? step.skill ?? step.kind}
+              title={step.tool ?? step.skill ?? step.hook ?? step.kind}
             >
-              {step.tool ?? step.skill ?? step.kind}
+              {step.tool ?? step.skill ?? step.hook ?? step.kind}
             </span>
+            {/*
+             * Red, hatanın önünde gösteriliyor: reddedilen bir çağrı da
+             * `isError` taşıyor ama sebebi skill değil, izin katmanı. İkisi
+             * aynı cümleyle anlatılırsa ölçüm yanlış okunur.
+             */}
             <span className="min-w-0 break-words">
-              {step.isError === true
-                ? (step.error ?? 'failed')
-                : (step.text ?? formatArgs(step.args) ?? step.outcome ?? '')}
+              {step.refusal !== undefined
+                ? step.refusal
+                : step.isError === true
+                  ? (step.error ?? 'failed')
+                  : (step.text ?? formatArgs(step.args) ?? step.outcome ?? '')}
             </span>
           </li>
         ))}

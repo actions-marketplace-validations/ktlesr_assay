@@ -6,6 +6,9 @@ export {
   passthroughEnv,
   resolveBinary,
   skillMatches,
+  isPermissionMode,
+  PERMISSION_MODES,
+  type PermissionMode,
   type ClaudeCodeSession,
   type ClaudeCodeAdapterOptions,
 } from './claude-code/adapter.js'
@@ -17,4 +20,5 @@ export {
   type ParsedStream,
   type InitEvent,
   type ResultEvent,
+  type PermissionDenial,
 } from './claude-code/stream.js'

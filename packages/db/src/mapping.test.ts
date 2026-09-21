@@ -89,8 +89,10 @@ const attempt = (
         available: true,
         triggered: verdict === 'pass',
         skills: ['docx'],
+        refused: false,
+        refusals: [],
         complete: true,
-        via: 'Skill tool call in stream-json',
+        via: 'confirmed Skill activation in stream-json',
       }
     : { available: false, reason: 'the host emitted no skill marker' },
   assertions: [],
@@ -465,5 +467,226 @@ describe('iz olayı dönüşümü', () => {
     expect(() => fromTraceEventRow({ seq: 1, kind: 'NOPE' } as never)).toThrow(
       'unknown trace event kind',
     )
+  })
+})
+
+/**
+ * 0.2.0 — yeni alanlar gidiş-dönüşte kaybolmuyor.
+ *
+ * Hosted taraf kaydı **alır**, kendi formatını dayatmaz: bir alan eşlemede
+ * düşerse ölçümün koşulu sessizce kaybolur. `pinEnvironmentHash` bunun canlı
+ * örneğiydi — yerel kayıtta vardı, veritabanında hiç saklanmıyordu ve pin 3
+ * yüklenen her koşumda "ölçülemedi" kalıyordu.
+ */
+describe('0.2.0 alanları — eşleme', () => {
+  const bareRun = (overrides: Partial<Run> = {}): Run => ({
+    id: 'r1',
+    skill: 'docx',
+    startedAt: '2026-09-05T00:00:00.000Z',
+    finishedAt: '2026-09-05T00:00:10.000Z',
+    host: 'claude-code',
+    pins: {
+      skillSource: 'o/r@1',
+      skillHash: 'sha256:a',
+      model: 'm',
+      systemPromptHash: 'not-provided-by-host',
+      suiteVersion: 1,
+      suiteHash: 'sha256:b',
+    },
+    runs: 10,
+    cases: [],
+    verdict: 'pass',
+    ...overrides,
+  })
+
+  it('reddedilen aktivasyon satıra ve geri kanonik hâle döner', () => {
+    const refusals = [{ skill: 'docx', reason: 'the host denied permission' }]
+    const row = toAttemptRow({
+      ...attempt(0, 'unknown', true),
+      trigger: {
+        available: true,
+        triggered: false,
+        skills: [],
+        refused: true,
+        refusals,
+        complete: true,
+        via: 'confirmed Skill activation in stream-json',
+      },
+    })
+    expect(row.triggerRefused).toBe(true)
+    expect(row.triggerRefusals).toEqual(refusals)
+
+    const back = fromAttemptRow(row, 'c', undefined, undefined)
+    expect(back.trigger.available === true && back.trigger.refused).toBe(true)
+    expect(back.trigger.available === true && back.trigger.refusals).toEqual(refusals)
+  })
+
+  it('sinyal okunamadıysa red durumu da null — "reddedilmedi" yazılmaz', () => {
+    const row = toAttemptRow({
+      ...attempt(0, 'unknown', false),
+      trigger: { available: false, reason: 'no signal' },
+    })
+    expect(row.triggerRefused).toBeNull()
+    expect(row.triggerRefusals).toEqual([])
+  })
+
+  it('hook olayı izde korunur', () => {
+    const hook = {
+      name: 'SessionStart:startup',
+      event: 'SessionStart',
+      phase: 'response' as const,
+      exitCode: 1,
+      outcome: 'cancelled',
+      stdout: 'x',
+    }
+    const row = toTraceEventRow({ seq: 1, kind: 'hook', hook })
+    expect(row.kind).toBe('HOOK')
+    expect(row.hook).toEqual(hook)
+    expect(fromTraceEventRow(row)).toEqual({ seq: 1, kind: 'hook', hook })
+  })
+
+  it('izin reddi araç sonucunda korunur', () => {
+    const event = {
+      seq: 2,
+      kind: 'tool_result' as const,
+      callId: 't1',
+      tool: 'Skill',
+      isError: true,
+      error: 'denied',
+      refusal: 'the host denied permission to use Skill',
+    }
+    expect(fromTraceEventRow(toTraceEventRow(event))).toEqual(event)
+  })
+
+  it('izin modu ve ortam hash"i koşum satırında durur', () => {
+    const run = bareRun({
+      pins: {
+        skillSource: 'o/r@1',
+        skillHash: 'sha256:a',
+        model: 'm',
+        systemPromptHash: 'not-provided-by-host',
+        suiteVersion: 1,
+        suiteHash: 'sha256:b',
+        environmentHash: 'sha256:env',
+      },
+      permissionMode: 'acceptEdits',
+    })
+    const row = toRunRow(run)
+    expect(row.permissionMode).toBe('acceptEdits')
+    expect(row.pinEnvironmentHash).toBe('sha256:env')
+
+    const back = fromRunRow(row, [])
+    expect(back.permissionMode).toBe('acceptEdits')
+    expect(back.pins.environmentHash).toBe('sha256:env')
+  })
+
+  it('beklenen kazanan: iddia yok, none ve liste ayri kaliyor (0.4.0)', () => {
+    const base = run.cases[0] as NonNullable<(typeof run.cases)[number]>
+    for (const expectedWinner of [undefined, [], ['a'], ['a', 'b']]) {
+      const result = { ...base, ...(expectedWinner === undefined ? {} : { expectedWinner }) }
+      const row = toCaseResultRow(result)
+      expect(row.expectsWinner).toBe(expectedWinner !== undefined)
+      const back = fromCaseResultRow(row, result.attempts)
+      if (expectedWinner === undefined) expect('expectedWinner' in back).toBe(false)
+      else expect(back.expectedWinner).toEqual(expectedWinner)
+    }
+  })
+
+  it('vaka tanimi kazanan iddiasini tasiyor; none bayrak acik + bos liste (0.4.0)', () => {
+    const parsed = parseSuite(`
+version: 1
+target: { skill: cro, source: o/r@1 }
+environment: { host: h, model: m, system_prompt_hash: x, active_skills: [cro, signup] }
+runs: 2
+cases:
+  - id: collide.signup.a
+    prompt: p
+    expect: { winner: signup }
+  - id: negative.b
+    prompt: p
+    expect: { winner: none }
+`)
+    if (!parsed.ok) throw new Error(parsed.issues.map((i) => i.message).join('; '))
+    const [a, b] = parsed.suite.cases.map(toCaseRow)
+    expect([a?.expectsWinner, a?.expectedWinner]).toEqual([true, ['signup']])
+    expect([b?.expectsWinner, b?.expectedWinner]).toEqual([true, []])
+  })
+
+  it('butce kesmesiyle unknown olan kosumun gerekcesi kesmeyi soyluyor', () => {
+    // Bütçe kesmesi hiçbir denemeyi `unknown` yapmıyor; gerekçe denemelerden
+    // türetilseydi yedek cümleye düşer ve "hiçbir deneme açıklamadı" derdi.
+    const run = bareRun({
+      verdict: 'unknown',
+      skipped: [{ caseId: 'trigger.negative.x', reason: 'the attempt budget of 3 was reached', cause: 'budget' }],
+    })
+    const row = toRunRow(run)
+    expect(row.unknownReason).toContain('the attempt budget cut 1 case(s)')
+    expect(row.unknownReason).not.toContain('no attempt explained why')
+    expect(fromRunRow(row, []).skipped).toEqual(run.skipped)
+  })
+
+  it('yarim kaydin gerekcesi kesilmeyi ve ulasilamayan vakalari soyluyor', () => {
+    // Yarım kayıt hiçbir denemeyi `unknown` yapmadan `unknown`: gerekçe
+    // denemelerden türetilseydi yedek cümleye düşerdi.
+    const run = bareRun({
+      verdict: 'unknown',
+      partial: { reason: 'the run was interrupted', recoveredAt: '2026-09-10T00:00:00.000Z' },
+      skipped: [
+        { caseId: 'trigger.negative.x', reason: 'the run was interrupted before this case started', cause: 'interrupted' },
+      ],
+    })
+    const row = toRunRow(run)
+    expect(row.unknownReason).toContain('interrupted before 1 case(s) started')
+    expect(row.unknownReason).toContain('the record is incomplete, so it cannot pass')
+    expect(row.unknownReason).not.toContain('no attempt explained why')
+    expect(fromRunRow(row, []).skipped).toEqual(run.skipped)
+  })
+
+  it('Assay surumu kosum satirinda durur; yoksa geri NULL degil alansiz gelir (0.3.2)', () => {
+    const stamped = bareRun({ assayVersion: '0.3.2' })
+    const row = toRunRow(stamped)
+    expect(row.assayVersion).toBe('0.3.2')
+    expect(fromRunRow(row, []).assayVersion).toBe('0.3.2')
+
+    // Eski satır: sütun NULL. Kayda `assayVersion: null` olarak sızmıyor;
+    // okuma tarafı etiketini `assayVersionLabel`dan alıyor.
+    const old = fromRunRow(toRunRow(bareRun()), [])
+    expect('assayVersion' in old).toBe(false)
+  })
+
+  it('ortam kaydi kosum satirinda durur ve geri okunur', () => {
+    const environment = {
+      model: 'claude-haiku-4-5-20251001',
+      version: '2.1.263',
+      permissionMode: 'bypassPermissions',
+      tools: ['Bash', 'Read'],
+      skills: ['impeccable'],
+      agents: [],
+      plugins: ['impeccable@4.2.2'],
+    }
+    const row = toRunRow(bareRun({ environment }))
+    expect(row.environment).toEqual(environment)
+    expect(fromRunRow(row, []).environment).toEqual(environment)
+  })
+
+  it('sekli tutmayan bir jsonb degeri ortam sayilmaz', () => {
+    // Sütun jsonb; oraya ne yazıldığı çalışma zamanında bilinmiyor. Şekli
+    // tutmayan bir değeri Environment diye geçirmek, karşılaştırmanın kayan
+    // alanı yanlış okuması demek olurdu — düzeltilen kusurun bir katman
+    // aşağıdaki hâli.
+    const row = { ...toRunRow(bareRun({})), environment: { model: 'm' } }
+    expect(fromRunRow(row, []).environment).toBeUndefined()
+  })
+
+  it('ortam yoksa alan hic yazilmaz — uydurulmaz', () => {
+    const row = toRunRow(bareRun({}))
+    expect(row.environment).toBeNull()
+    expect(fromRunRow(row, []).environment).toBeUndefined()
+  })
+
+  it('host mod bildirmediyse alan geri okumada da yok — uydurulmaz', () => {
+    const row = toRunRow(bareRun())
+    expect(row.permissionMode).toBeNull()
+    expect(fromRunRow(row, [])).not.toHaveProperty('permissionMode')
   })
 })

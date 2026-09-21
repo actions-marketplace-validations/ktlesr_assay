@@ -123,8 +123,8 @@ jobs:
           # Boş `publish`, action'ı yalnızca sürüm hazırlığı moduna sokar.
           # Yayın komutu yalnızca elle tetiklenen koşumda doluyor.
           publish: ${{ needs.guard.outputs.publishing == 'true' && 'pnpm release' || '' }}
-          commit: 'chore(release): sürümleri yükselt'
-          title: 'chore(release): sürümleri yükselt'
+          commit: 'chore(release): version packages'
+          title: 'chore(release): version packages'
         env:
           # NPM_TOKEN bilerek verilmiyor: changesets/action token bulamayınca
           # OIDC'ye düşüyor ve trusted publishing kullanıyor.

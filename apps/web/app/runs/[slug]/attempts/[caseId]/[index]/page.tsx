@@ -34,6 +34,7 @@ export default async function AttemptPage({
   return (
     <Shell
       breadcrumbs={[
+        { label: 'measurements', href: '/suites' },
         { label: item.run.skill, href: `/suites/${encodeURIComponent(item.run.skill)}` },
         { label: 'run', href: `/runs/${slug}` },
         { label: `attempt ${attempt.index + 1}` },
@@ -119,7 +120,7 @@ export default async function AttemptPage({
                 </span>
                 <div className="min-w-0">
                   <p className="case-id">{label(result.assertion)}</p>
-                  <p className="case-count max-w-[70ch]">{result.reason}</p>
+                  <p className="case-count max-w-[70ch] [overflow-wrap:anywhere]">{result.reason}</p>
                 </div>
               </li>
             ))}
@@ -146,6 +147,23 @@ export default async function AttemptPage({
             isError: event.isError,
             outcome: event.outcome,
             args: event.args as Record<string, unknown> | undefined,
+            refusal: event.refusal,
+            // Hook adımında satırın adı kancanın adı: `SessionStart:startup`
+            // bir araçtan da bir skill'den de daha çok şey söylüyor.
+            hook: event.hook === undefined ? undefined : `${event.hook.name}`,
+            ...(event.hook === undefined
+              ? {}
+              : {
+                  text: [
+                    event.hook.phase,
+                    event.hook.outcome,
+                    event.hook.exitCode === undefined
+                      ? undefined
+                      : `exit ${event.hook.exitCode}`,
+                  ]
+                    .filter((part) => part !== undefined)
+                    .join(' · '),
+                }),
           }))}
           {...(swallowed === undefined
             ? {}

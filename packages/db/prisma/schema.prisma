@@ -38,6 +38,7 @@ enum TraceEventKind {
   ASSISTANT_MESSAGE
   SKILL_TRIGGER
   SESSION_END
+  HOOK
 }
 
 enum SessionOutcome {
@@ -100,6 +101,9 @@ model Case {
   expectTriggered Boolean?
   /// Coexistence: tetiklenmemesi gereken diğer skill'ler.
   notTriggered    String[] @default([])
+  /// Beklenen kazanan (0.4.0); bayrak açık + boş dizi = `winner: none`.
+  expectsWinner   Boolean  @default(false)
+  expectedWinner  String[] @default([])
   /// Assertion listesi. Biçimi `@ktlsr/assay-core`'daki `Assertion` birleşimi.
   assertions      Json     @default("[]")
 
@@ -133,8 +137,46 @@ model Run {
   pinSuiteVersion     Int
   pinSuiteHash        String
 
+  /// Pin 3'ün denetçisi — host'un bildirdiği ortamdan türetilen hash.
+  /// Adaptör veremediyse null ve pin 3 "ölçülemedi" kalır.
+  pinEnvironmentHash String?
+
+  /// Host'un bildirdiği izin modu. Ölçümün koşulu: araçları kısıtlanmış bir
+  /// skill ile kısıtlanmamış olan aynı skill değil. Host bildirmediyse null.
+  permissionMode String?
+
+  /// Kaydı üreten Assay sürümü (0.3.2). Null = 0.3.1 ya da öncesi; geriye
+  /// dönük doldurulmaz, çünkü bilinmiyor. Okuma tarafı null'ı adıyla söyler.
+  assayVersion String?
+
+  /// `pinEnvironmentHash`in girdisi olan ortam kaydı — model, sürüm, araç ve
+  /// skill listeleri, izin modu, output style. Hash "bir şey değişti"
+  /// diyebiliyor; kayan alanı adıyla söyleyebilmek için bileşenler de
+  /// saklanıyor (0.3.0-a). Host bildirmediyse null.
+  environment Json?
+
   /// Vaka başına tekrar sayısı. Asla 1 varsayılan değil (#3).
   runsPerCase Int
+
+  /// Bu koşumda ölçülen katmanlar. Boş dizi = hepsi ölçüldü. Hızlı mod
+  /// yalnızca tetiklenmeyi ölçüyor ve kayıt bunu kendi içinde söylemek
+  /// zorunda: yoksa dar bir ölçüm tam bir ölçüm gibi okunur.
+  layers String[] @default([])
+
+  /// Hiç koşulmamış vakalar ve sebepleri. `CaseResult` içinde sıfır denemeli
+  /// bir satır YOK: "koşulmadı" ile "koşuldu, karar çıkmadı" ayrı şeyler.
+  skipped Json?
+
+  /// Aynı anda koşan deneme sayısı. Null ise 1. Ortam hash'ine girmiyor —
+  /// host'un ortamı değil koşum düzeni — ama gecikme ve maliyet sayıları eş
+  /// zamanlı koşumda aynı şeyi ölçmediği için kayıtta duruyor.
+  concurrency Int?
+
+  /// Koşum yarım kaldı ve journal'dan toparlandı: sebep, kurtarma anı ve
+  /// okunamayan satır sayısı. Null ise koşum normal bitti. Kayıt yarım
+  /// olduğunu söylemek zorunda — okuyucu runsPerCase görüp vaka başına o
+  /// kadar deneme sanmamalı.
+  partial Json?
 
   verdict Verdict
   /// `verdict = UNKNOWN` ise zorunlu. CHECK ile.
@@ -173,6 +215,11 @@ model CaseResult {
   /// Vakanın tetiklenme iddiası — kayıt kendi kendine yetsin diye kopyalanır.
   expectTriggered Boolean?
 
+  /// Çakışma vakasının beklenen kazananı (0.4.0). Bayrak iddianın varlığı,
+  /// dizi içeriği; bayrak açık + boş dizi = `winner: none`.
+  expectsWinner  Boolean  @default(false)
+  expectedWinner String[] @default([])
+
   attempts Attempt[]
 
   @@unique([runId, caseId])
@@ -200,6 +247,11 @@ model Attempt {
   triggerVia       String?
   triggerReason    String?
   triggerSkills    String[] @default([])
+  /// Hedef skill seçildi ama aktivasyonu doğrulanamadı — ne tetiklenme ne
+  /// tetiklenmeme. `true` iken `triggerTriggered = false` olmak zorunda.
+  triggerRefused   Boolean?
+  /// Aktivasyonu doğrulanamayan her çağrı, sebebiyle. Biçimi `RefusedActivation[]`.
+  triggerRefusals  Json     @default("[]")
 
   latencyMs    Int?
   inputTokens  Int?
@@ -235,6 +287,11 @@ model TraceEvent {
   acknowledgesError Boolean?
   skill             String?
   outcome           SessionOutcome?
+  /// İzin katmanı çağrıyı reddettiyse sebebi. "Skill bunu yapamadı" ile
+  /// "Assay buna izin vermedi" iki farklı ölçüm.
+  refusal           String?
+  /// `kind = HOOK` için host'un çalıştırdığı hook. Biçimi `HookRecord`.
+  hook              Json?
 
   @@unique([attemptId, seq])
   @@index([attemptId, kind])

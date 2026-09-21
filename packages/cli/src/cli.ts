@@ -7,10 +7,15 @@
  * Argüman ayrıştırması `node:util.parseArgs` ile — bağımlılık eklemeye değmez.
  */
 
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { ClaudeCodeAdapter } from '@ktlsr/assay-adapters'
+import {
+  ClaudeCodeAdapter,
+  isPermissionMode,
+  PERMISSION_MODES,
+  type PermissionMode,
+} from '@ktlsr/assay-adapters'
 import {
   compareRuns,
   parseSuite,
@@ -19,8 +24,17 @@ import {
   type Run,
   type Suite,
 } from '@ktlsr/assay-core'
-import { RunStore, runSuite, suiteHash } from '@ktlsr/assay-runner'
+import {
+  ASSAY_VERSION,
+  findJournals,
+  recoverJournal,
+  localNames,
+  RunStore,
+  runSuite,
+  suiteHash,
+} from '@ktlsr/assay-runner'
 import { renderHtmlReport } from './html.js'
+import { findPersonalData, maskedCount } from './scan.js'
 import {
   renderComparison,
   renderIssues,
@@ -38,6 +52,12 @@ export const EXIT = {
   usage: 2,
   /** Ölçüm yapılamadı. Başarısızlıktan ayrı tutulur (değişmez #1). */
   unknown: 3,
+  /**
+   * `push`: yükleme gerçekleşmedi — sunucuya ulaşılamadı ya da sunucu reddetti
+   * (0.4.1-e). Kullanım hatası değil: komut doğru yazıldı, sorun karşı tarafta
+   * ya da kayıtta; CI'ın "komutu düzelt" ile "sunucuya bak"ı ayırabilmesi için.
+   */
+  upload: 4,
 } as const
 
 const USAGE = `assay — a CI test runner for Agent Skills
@@ -50,6 +70,7 @@ Usage
   assay compare <run-a> <run-b>     compare two stored runs, pins checked
   assay ci <suite.yaml>             run and exit non-zero on failure
   assay push [run-id]               upload a stored run to a hosted instance
+  assay recover                     rebuild records from interrupted runs
   assay scrub [dir]                 mask usernames and secrets in stored records
 
 Options
@@ -58,15 +79,63 @@ Options
   --html <file>       also write a self-contained HTML report
   --store <dir>       run store root (default: .assay)
   --model <id>        override the suite's model
+  --permission-mode <mode>
+                      host permission mode (default: acceptEdits). A skill that
+                      declares allowed-tools cannot activate under acceptEdits.
+                      The mode is part of the measurement: it is written to the
+                      run record and to the environment hash, so runs measured
+                      under different modes do not compare.
+                      modes: ${PERMISSION_MODES.join(', ')}
+  --allow-bypass-permissions
+                      required to actually use bypassPermissions: that mode
+                      removes every boundary the sandbox observes
+  --concurrency <n>   attempts to run at once (default 1). Speeding up is a
+                      choice, not a default: parallel attempts share CPU, RAM,
+                      ports and the host's rate limit. Each worker is given a
+                      disjoint port range (PORT, VITE_PORT, ASSAY_PORT_RANGE) —
+                      a mitigation, not a guarantee: a server with a hardcoded
+                      port ignores them. The value is written to the run record
+                      because latency and cost are not comparable across it.
+  --fast              early warning, not evidence: 3 attempts per case and the
+                      trigger layer only. Cases that only declare assertions
+                      are not run; in cases that do run, declared assertions
+                      are listed as not evaluated rather than counted as
+                      unknown. The record says which layers were measured.
+                      Use the full run before a release.
+  --max-attempts <n>  cap the total attempts. Cases past the cap are not run
+                      and are named in the record with the reason. A run the
+                      cap cut short cannot pass: at best it is unknown, since
+                      the cut cases may be every negative in the suite.
   --allow-unknown     do not fail CI when attempts could not be measured
+  --no-isolation      run attempts in this process instead of one process each.
+                      Isolation is on by default: the measured agent can kill
+                      processes on this machine, and a killed attempt should
+                      cost one attempt, not the run. It is a limit, not a
+                      shield — the supervising process is a node process too.
+  --container <image> run each attempt in its own container from this image
+                      (tools/runner-env). The container has no way out but an
+                      egress proxy that admits the npm registry and Playwright's
+                      CDNs; Assay's own code is mounted from this machine. The
+                      image digest, platform, egress allowlist and limits go into
+                      the record and the environment hash, so container runs do
+                      not compare with runs on this machine.
+  --container-api <name:port>
+                      the container that answers the Anthropic API for the
+                      attempt containers (the credential proxy). It is attached
+                      to the run's network; attempts only ever see a placeholder
+                      key. Required with --container.
   --json              print the run record as JSON instead of a summary
   --suite <file>      the case set the run was measured with (push)
   --url <base>        hosted instance base URL (push, or ASSAY_URL)
   --token <token>     API token (push, or ASSAY_TOKEN — prefer the variable)
+  --allow-unmasked    upload even though push found your username or a secret
+                      left in the record after masking (push)
+  --version           print the Assay version
   -h, --help          show this text
 
 Exit codes
   0 ok · 1 a case failed · 2 usage error · 3 nothing could be measured
+  4 the upload did not happen (push): the server was unreachable or refused it
 `
 
 type Options = Record<string, unknown>
@@ -83,12 +152,22 @@ export async function main(argv: readonly string[]): Promise<number> {
         html: { type: 'string' },
         store: { type: 'string' },
         model: { type: 'string' },
+        'permission-mode': { type: 'string' },
+        'allow-bypass-permissions': { type: 'boolean' },
         'allow-unknown': { type: 'boolean' },
+        'allow-unmasked': { type: 'boolean' },
+        'no-isolation': { type: 'boolean' },
+        concurrency: { type: 'string' },
+        container: { type: 'string' },
+        'container-api': { type: 'string' },
+        fast: { type: 'boolean' },
+        'max-attempts': { type: 'string' },
         json: { type: 'boolean' },
         suite: { type: 'string' },
         url: { type: 'string' },
         token: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
+        version: { type: 'boolean' },
       },
     })
   } catch (cause) {
@@ -97,6 +176,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const [command, ...positionals] = parsed.positionals
+  // Hangi sürümün koştuğu (0.4.1-h); kayıt da aynı değeri `assayVersion`da taşıyor.
+  if (parsed.values.version === true) {
+    process.stdout.write(`${ASSAY_VERSION}
+`)
+    return EXIT.ok
+  }
   if (parsed.values.help === true || command === undefined) {
     process.stdout.write(USAGE)
     return command === undefined && parsed.values.help !== true ? EXIT.usage : EXIT.ok
@@ -117,6 +202,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       return compare(positionals[0], positionals[1], parsed.values)
     case 'push':
       return push(positionals[0], parsed.values)
+    case 'recover':
+      return recover(parsed.values)
     case 'scrub':
       return scrub(positionals[0], parsed.values)
     default:
@@ -277,29 +364,184 @@ async function run(
       ? suite
       : { ...suite, environment: { ...suite.environment, model } }
 
-  const adapter = new ClaudeCodeAdapter()
-  const record = await runSuite(effective, adapter, {
-    source,
-    suitePath: loaded.path,
-    skillPath: resolve(skillPath),
-    ...(repeat === undefined ? {} : { repeat }),
-    onProgress: (event) => {
-      if (options['json'] === true) return
-      const mark = {
-        pass: style.green('✓'),
-        fail: style.red('✗'),
-        unknown: style.yellow('?'),
-      }[event.verdict]
-      process.stderr.write(
-        `  ${mark} ${event.caseId} ${style.grey(`${event.attempt + 1}/${event.attempts}`)}\n`,
-      )
-      if (event.verdict !== 'pass') {
-        process.stderr.write(`      ${style.grey(event.reason.slice(0, 200))}\n`)
-      }
-    },
+  // İzin modu ölçümün koşulu: yanlış yazılmış bir mod sessizce varsayılana
+  // düşerse kullanıcı ölçtüğünü sandığı şeyi ölçmemiş olur.
+  const requestedMode = options['permission-mode']
+  if (requestedMode !== undefined && !isPermissionMode(String(requestedMode))) {
+    process.stderr.write(
+      `${style.red('error')} unknown --permission-mode "${String(requestedMode)}"; expected one of ${PERMISSION_MODES.join(', ')}\n`,
+    )
+    return EXIT.usage
+  }
+  const permissionMode = requestedMode as PermissionMode | undefined
+  if (permissionMode === 'bypassPermissions' && options['allow-bypass-permissions'] !== true) {
+    process.stderr.write(
+      `${style.red('error')} --permission-mode bypassPermissions removes every boundary the sandbox observes; ` +
+        `pass --allow-bypass-permissions to state that you meant it\n`,
+    )
+    return EXIT.usage
+  }
+
+  const adapter = new ClaudeCodeAdapter({
+    ...(permissionMode === undefined ? {} : { permissionMode }),
+    ...(options['allow-bypass-permissions'] === true
+      ? { allowBypassPermissions: true }
+      : {}),
   })
 
   const store = new RunStore(storeOptions(options))
+  // Önceki bir koşum öldüyse journal'ı hâlâ orada. Sessizce üstüne koşmak,
+  // kullanıcının kurtarılabilir bir ölçümü olduğunu bilmemesi demek.
+  const orphans = await findJournals(store.directory)
+  if (orphans.length > 0) {
+    process.stderr.write(
+      `${style.yellow('warning')} ${orphans.length} interrupted run(s) left a journal in ${store.directory}; ` +
+        `run "assay recover" to turn them into records before they are forgotten\n`,
+    )
+  }
+
+  /*
+   * Her deneme kendi sürecinde.
+   *
+   * Ölçülen ajan işini doğrulamak için başlattığı sunucuları porta göre
+   * öldürüyor ve runner aynı makinede sıradan bir `node` süreci; 4.2.2
+   * ölçümünde koşum iki kez bu yüzden öldü (docs/blockers.md). Deneme ayrı bir
+   * süreçte koşarsa öldürülen şey koşumun tamamı değil bir deneme olur.
+   *
+   * Bu **koruma değil**, sınırlama: sevk katmanı da aynı makinede bir `node`
+   * süreci ve onu da öldürebilecek bir çağrı var. `--no-isolation` kaçış yolu;
+   * kütüphane olarak çağıranlar için varsayılan zaten süreç içi.
+   */
+  const isolate =
+    options['no-isolation'] === true
+      ? undefined
+      : {
+          /*
+           * Modül burada, ÇAĞIRANDA çözülüyor.
+           *
+           * Worker `packages/runner` içinde yaşıyor ve `runner` adapters'a
+           * bağlanamıyor (docs/stack.md); bare specifier orada çözülmüyor ve
+           * her deneme "the attempt process exited with code 1" veriyordu —
+           * uçtan uca duman testi bunu ilk koşumda gösterdi. Çözümlemeyi
+           * adapters'a gerçekten bağlı olan paket yapıyor.
+           */
+          module: import.meta.resolve('@ktlsr/assay-adapters'),
+          export: 'ClaudeCodeAdapter',
+          options: {
+            ...(permissionMode === undefined ? {} : { permissionMode }),
+            ...(options['allow-bypass-permissions'] === true
+              ? { allowBypassPermissions: true }
+              : {}),
+          },
+        }
+
+  /*
+   * Hızlı mod: erken uyarı, kanıt değil.
+   *
+   * İlk deneyimde kimse sekiz saat harcamıyor. N=3 ve yalnız tetiklenme
+   * katmanı, dakikalar içinde "bu skill hâlâ ateşliyor mu" sorusuna cevap
+   * veriyor. Verdiği cevabın sınırı kayıtta ve raporda yazılı: aralıklar
+   * geniş, artefakt iddiaları hiç sınanmadı.
+   *
+   * `--repeat` ile birlikte verilirse kullanıcının sayısı kazanıyor — hızlı
+   * mod bir kısayol, bir kilit değil.
+   */
+  const fast = options['fast'] === true
+  const maxAttempts = parseCount(options['max-attempts'])
+  if (maxAttempts === 'invalid') {
+    process.stderr.write(`${style.red('error')} --max-attempts must be a positive integer\n`)
+    return EXIT.usage
+  }
+  /*
+   * Hızlı modun gizli bir tavanı YOK — yalnızca kullanıcının `--max-attempts`i.
+   * İlk hâli 60'lık bir tavan koyuyordu; bütçenin kestiği koşum artık `pass`
+   * veremediği için o tavan 20 vakadan büyük her suite'i hızlı modda sessizce
+   * `unknown`a mahkûm ederdi. Maliyet tavanı kullanıcının bilerek verdiği bir
+   * karar olmalı (decisions.md, 2026-09-10).
+   */
+  const budget = maxAttempts
+
+  const concurrency = parseConcurrency(options['concurrency'])
+  if (concurrency === 'invalid') {
+    process.stderr.write(
+      `${style.red('error')} --concurrency must be a positive integer\n`,
+    )
+    return EXIT.usage
+  }
+  if (concurrency !== undefined && concurrency > 1 && isolate === undefined) {
+    // Süreç içi koşumda port kirası verilemiyor (tek ortam, N deneme) ve
+    // öldürülen bir deneme koşumun tamamını götürüyor.
+    process.stderr.write(
+      `${style.yellow('warning')} --concurrency with --no-isolation shares one process and one ` +
+        `environment: attempts cannot be given separate port ranges, and one killed attempt ends the run\n`,
+    )
+  }
+
+  /*
+   * Konteyner koşumu (K2). Kimlik bilgisi konteynere hiç verilmiyor: API'yi
+   * kimlik proxy'si konteyneri cevaplıyor, deneme yalnızca yer tutucu anahtar
+   * görüyor. Proxy olmadan konteyner koşumu model çağıramaz; bu yüzden şart.
+   */
+  const containerImage = typeof options['container'] === 'string' ? options['container'] : undefined
+  const containerApi = typeof options['container-api'] === 'string' ? options['container-api'] : undefined
+  if (containerImage !== undefined && containerApi === undefined) {
+    process.stderr.write(
+      `${style.red('error')} --container needs --container-api <name:port>: the attempt containers reach the model only through a credential proxy container\n`,
+    )
+    return EXIT.usage
+  }
+  if (containerImage === undefined && containerApi !== undefined) {
+    process.stderr.write(`${style.red('error')} --container-api only applies with --container <image>\n`)
+    return EXIT.usage
+  }
+  if (containerImage !== undefined && isolate === undefined) {
+    process.stderr.write(
+      `${style.red('error')} --container runs every attempt in its own container; it cannot be combined with --no-isolation\n`,
+    )
+    return EXIT.usage
+  }
+
+  let record
+  try {
+    record = await runSuite(effective, adapter, {
+      source,
+      suitePath: loaded.path,
+      skillPath: resolve(skillPath),
+      journalDir: store.directory,
+      ...(isolate === undefined ? {} : { isolate }),
+      ...(containerImage === undefined || containerApi === undefined
+        ? {}
+        : { container: { image: containerImage, api: containerApi } }),
+      ...(concurrency === undefined ? {} : { concurrency }),
+      ...(fast ? { layers: ['trigger'] as const } : {}),
+      ...(budget === undefined ? {} : { maxAttempts: budget }),
+      /*
+       * Hızlı modun tekrarı 3 — ama kullanıcı `--repeat` yazdıysa onunki
+       * kazanıyor. Değişmez #3 sağlanıyor: 3, 1'den büyük.
+       */
+      ...(repeat === undefined ? (fast ? { repeat: FAST_REPEAT } : {}) : { repeat }),
+      onProgress: (event) => {
+        if (options['json'] === true) return
+        const mark = {
+          pass: style.green('✓'),
+          fail: style.red('✗'),
+          unknown: style.yellow('?'),
+        }[event.verdict]
+        process.stderr.write(
+          `  ${mark} ${event.caseId} ${style.grey(`${event.attempt + 1}/${event.attempts}`)}\n`,
+        )
+        if (event.verdict !== 'pass') {
+          process.stderr.write(`      ${style.grey(event.reason.slice(0, 200))}\n`)
+        }
+      },
+    })
+  } catch (cause) {
+    // Konteyner düzeni kurulamadı (imaj yok, API konteyneri yok): hiçbir şey koşmadı.
+    if (containerImage === undefined) throw cause
+    process.stderr.write(`${style.red('error')} ${message(cause)}\n`)
+    return EXIT.usage
+  }
+
   const savedTo = await store.save(record)
   await emit(record, options)
   process.stderr.write(style.grey(`  stored ${savedTo}\n`))
@@ -369,6 +611,74 @@ async function compare(
 
 // ---------------------------------------------------------------------------
 // Ortak
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// recover
+// ---------------------------------------------------------------------------
+
+/**
+ * Yarım kalmış koşumları journal'dan kayda çevirir.
+ *
+ * Ölçülen ajan runner'ı öldürebiliyor (bkz. docs/blockers.md) ve koşum
+ * ortasında ölen bir süreç eskiden o ana kadar tamamlanmış her denemeyi de
+ * götürüyordu. Journal o denemeleri diskte tutuyor; bu komut onları kayda
+ * çeviriyor.
+ *
+ * Kurtarılan kayıt **yarım olduğunu söylüyor**: `partial` alanı sebebi,
+ * kurtarma anını ve okunamayan satır sayısını taşıyor.
+ */
+async function recover(options: Options): Promise<number> {
+  const store = new RunStore(storeOptions(options))
+  const journals = await findJournals(store.directory)
+
+  if (journals.length === 0) {
+    process.stderr.write(
+      `${style.grey('nothing to recover')} no interrupted run left a journal in ${store.directory}\n`,
+    )
+    return EXIT.ok
+  }
+
+  let recovered = 0
+  let skipped = 0
+  for (const path of journals) {
+    let result
+    try {
+      result = await recoverJournal(path)
+    } catch (cause) {
+      process.stderr.write(`${style.red('error')} ${path}: ${message(cause)}\n`)
+      skipped += 1
+      continue
+    }
+    if (result === null) {
+      // Denemesiz ya da başlıksız bir journal kayda çevrilmiyor — ve
+      // SİLİNMİYOR: okunamayan ama var olan bir dosyayı yok etmek, ölçüm
+      // aracının yapmaması gereken şey.
+      process.stderr.write(
+        `${style.yellow('skipped')} ${path} carries no completed attempt; left in place\n`,
+      )
+      skipped += 1
+      continue
+    }
+    const savedTo = await store.save(result.run)
+    await rm(path, { force: true })
+    recovered += 1
+    const attempts = result.run.cases.reduce((sum, c) => sum + c.attempts.length, 0)
+    process.stderr.write(
+      `${style.green('recovered')} ${result.run.id} — ${attempts} attempt(s) across ` +
+        `${result.run.cases.length} case(s)` +
+        (result.run.partial?.droppedLines === undefined
+          ? ''
+          : `, ${result.run.partial.droppedLines} unreadable line(s) dropped`) +
+        `\n  stored ${savedTo}\n`,
+    )
+  }
+
+  // Kurtarma bir ölçüm değil, bir onarım: kurtarılan koşumun verdict'i buranın
+  // çıkış koduna karışmıyor. Kullanıcı sonucu `assay report` ile okuyor.
+  return skipped > 0 && recovered === 0 ? EXIT.usage : EXIT.ok
+}
+
 // ---------------------------------------------------------------------------
 
 function storeOptions(options: Options): { root?: string } {
@@ -476,6 +786,26 @@ async function push(runId: string | undefined, options: Options): Promise<number
     return EXIT.usage
   }
 
+  // Yükleme public bir siteye gidebilir ve orada yayımlanan bir sayfa geri
+  // alınamaz; maskenin bıraktığı kişisel veri varsa gönderilmez (0.4.1-c).
+  const findings = findPersonalData(record, localNames())
+  if (findings.length > 0 && options['allow-unmasked'] !== true) {
+    process.stderr.write(
+      `${style.red('error')} the record still carries personal data in ${findings.length} place(s); nothing was uploaded\n` +
+        findings
+          .slice(0, 5)
+          .map((finding) => `  ${finding.kind.padEnd(9)}  ${finding.path}\n`)
+          .join('') +
+        (findings.length > 5 ? `  … and ${findings.length - 5} more\n` : '') +
+        `  Check those places. If they are not personal, pass --allow-unmasked.\n`,
+    )
+    return EXIT.usage
+  }
+  const onDisk = await readFile(join(store.directory, `${record.id}.json`), 'utf8')
+    .then((text) => (JSON.parse(text) as { run?: unknown }).run)
+    .catch(() => undefined)
+  const masked = onDisk === undefined ? 0 : maskedCount(onDisk, record)
+
   let response: Response
   try {
     response = await fetch(new URL('/api/runs', base), {
@@ -489,12 +819,14 @@ async function push(runId: string | undefined, options: Options): Promise<number
   } catch (cause) {
     process.stderr.write(`${style.red('error')} cannot reach ${base}: ${message(cause)}
 `)
-    return EXIT.usage
+    return EXIT.upload
   }
 
   const body = (await response.json().catch(() => ({}))) as {
     error?: string
     runId?: string
+    /** Koşumun vaka seti herkese açık mı (0.4.1-f); eski sunucular göndermez. */
+    public?: boolean
   }
 
   if (response.status === 201) {
@@ -503,6 +835,17 @@ async function push(runId: string | undefined, options: Options): Promise<number
   ${new URL(`/runs/${record.id}`, base).href}
 `,
     )
+    if (masked > 0) {
+      process.stdout.write(
+        `  ${style.yellow('masked')} ${masked} username(s) or secret(s) in the uploaded copy; the file on disk still has them — assay scrub masks it\n`,
+      )
+    }
+    // Yeni bir vaka seti gizli başlar; bağlantı başkasına 404 verir (0.4.1-f).
+    if (body.public === false) {
+      process.stdout.write(
+        `  ${style.yellow('private')} only you can open this link until an administrator publishes its case set (admin → case sets)\n`,
+      )
+    }
     return EXIT.ok
   }
   if (response.status === 409) {
@@ -514,7 +857,7 @@ async function push(runId: string | undefined, options: Options): Promise<number
     `${style.red('error')} ${response.status} ${body.error ?? 'the upload was rejected'}
 `,
   )
-  return EXIT.usage
+  return EXIT.upload
 }
 
 /**
@@ -540,11 +883,13 @@ async function scrub(dir: string | undefined, options: Options): Promise<number>
     return EXIT.usage
   }
 
+  // Bu makinenin hesap adı: desenlerin tahmin edemediği biçimleri de kapatıyor.
+  const accounts = localNames()
   let changed = 0
   for (const name of names) {
     const path = join(target, name)
     const raw = await readFile(path, 'utf8')
-    const clean = `${JSON.stringify(redactDeep(JSON.parse(raw) as unknown), null, 2)}\n`
+    const clean = `${JSON.stringify(redactDeep(JSON.parse(raw) as unknown, { names: accounts }), null, 2)}\n`
     if (clean === raw) continue
     await writeFile(path, clean, 'utf8')
     changed += 1
@@ -555,4 +900,29 @@ async function scrub(dir: string | undefined, options: Options): Promise<number>
     `${names.length} record(s) checked, ${changed} rewritten in ${target}\n`,
   )
   return EXIT.ok
+}
+
+/**
+ * Hızlı modun tekrar sayısı.
+ *
+ * Üç: değişmez #3'ün altına inmiyor ama dakikalarla ölçülüyor. Üç denemede
+ * aralık %29–100 kadar geniş çıkıyor ve rapor bunu manşette söylüyor —
+ * gizlenirse hızlı mod bir kanıt gibi okunur.
+ */
+const FAST_REPEAT = 3
+
+/** Pozitif tam sayı ya da kullanım hatası. */
+function parseCount(value: unknown): number | undefined | 'invalid' {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) return 'invalid'
+  return parsed
+}
+
+/** `--concurrency` — pozitif tam sayı ya da kullanım hatası. */
+function parseConcurrency(value: unknown): number | undefined | 'invalid' {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) return 'invalid'
+  return parsed
 }

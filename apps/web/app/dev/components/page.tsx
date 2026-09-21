@@ -21,7 +21,13 @@ export default function ComponentsPage() {
         </p>
       </header>
 
-      <div className="grid lg:grid-cols-2">
+      {/*
+        `<main>`: uygulama sayfalarındaki yığın koşulu burada da olsun (global
+        `main` kuralı, z-index 1). Katalog `div` iken portal katmanları hep
+        üstte göründü ve onay penceresinin sayfanın altında kalması (0.4.1-n)
+        burada hiç görülemedi — kusur yalnızca admin panelinde çıktı.
+      */}
+      <main className="grid lg:grid-cols-2">
         <section data-theme="light" className="bg-surface px-6 py-8 text-text">
           <p className="rule-label mb-8">Light</p>
           <Specimens />
@@ -33,7 +39,7 @@ export default function ComponentsPage() {
           <p className="rule-label mb-8">Dark</p>
           <Specimens />
         </section>
-      </div>
+      </main>
     </div>
   )
 }

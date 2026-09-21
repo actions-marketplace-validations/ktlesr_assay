@@ -43,6 +43,7 @@ export {
   storeRun,
   listRuns,
   loadRun,
+  RecordShapeError,
   RunAlreadyStoredError,
   type RunScope,
 } from './store.js'

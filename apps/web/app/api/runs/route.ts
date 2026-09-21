@@ -1,5 +1,6 @@
 import { parseSuite, type Run } from '@ktlsr/assay-core'
 import {
+  RecordShapeError,
   RunAlreadyStoredError,
   SuiteNotStorableError,
   isConfigured,
@@ -87,7 +88,9 @@ export async function POST(request: Request): Promise<Response> {
       run,
       ownerId: identity.userId,
     })
-    return json({ runId: stored.runId }, 201)
+    // `public`: yeni bir vaka seti gizli başlar ve CLI bunu söyleyebilsin diye
+    // gönderiliyor — yoksa bastığı bağlantı başkasına 404 verir (0.4.1-f).
+    return json({ runId: stored.runId, public: stored.suitePublic }, 201)
   } catch (cause) {
     if (cause instanceof RunAlreadyStoredError) {
       return json({ error: cause.message, runId: run.id }, 409)
@@ -95,7 +98,9 @@ export async function POST(request: Request): Promise<Response> {
     // Prisma'nın hata metni tablo ve sütun adlarını taşıyor; dışarıya yalnızca
     // bizim yazdığımız kural mesajları çıkar.
     const known =
-      cause instanceof SuiteNotStorableError || (cause instanceof Error && expected(cause))
+      cause instanceof SuiteNotStorableError ||
+      cause instanceof RecordShapeError ||
+      (cause instanceof Error && expected(cause))
     if (!known) console.error('run ingest failed', cause)
     return json(
       {

@@ -18,7 +18,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "coverage": "vitest run --coverage",
     "changeset": "changeset",
-    "version-packages": "changeset version && pnpm install --lockfile-only",
+    "version-packages": "changeset version && node tools/sync-action-pin.mjs && pnpm install --lockfile-only",
     "release": "pnpm -r --filter \"./packages/*\" publish --access public",
     "pack:check": "node tools/pack-check.mjs",
     "scan:build": "node tools/scan-build.mjs",

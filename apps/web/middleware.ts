@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { closedInPublicMode } from './lib/public-mode'
 
 /**
  * Yayın modu: yalnızca tanıtım sayfası ve yayımlanmış ölçümler.
@@ -10,10 +11,8 @@ import type { NextRequest } from 'next/server'
  * dashboard'a, boş bir admin paneline veya kimse için çalışmayan bir giriş
  * ekranına rastlamamalı.
  *
- * Kapatma yol eşleşmesiyle, kimlik doğrulamayla değil: bu middleware kenar
- * çalışma zamanında koşuyor ve orada Prisma yok (docs/decisions.md — RBAC
- * bilerek layout katmanında). Yol eşleşmesi hiçbir şeye bağlı değil, bu yüzden
- * sessizce bozulamaz.
+ * Kapalı rotaların listesi ve gerekçesi `lib/public-mode.ts`te; orada
+ * sınanıyor.
  *
  * `/signin`, `/admin` ve `/settings` KAPATILMIYOR: üçü de zaten kimlik
  * doğrulama arkasında (`requireUser` / `requireAdmin`, apps/web/lib/guard.ts).
@@ -22,24 +21,15 @@ import type { NextRequest } from 'next/server'
  * kapat, dağıt, işini yap, aç, tekrar dağıt.
  *
  * `/api/runs` da kapalı değil: token ile korunuyor ve kapatılırsa siteye yeni
- * ölçüm yüklenemez. `/runs` ve `/suites` açık, ama sorgu katmanı oturumsuz
- * ziyaretçiye yalnızca `public: true` vaka setlerini veriyor (RunScope).
+ * ölçüm yüklenemez. `/runs`, `/suites` ve `/compare` açık, ama sorgu katmanı
+ * oturumsuz ziyaretçiye yalnızca `public: true` vaka setlerini veriyor
+ * (RunScope).
  */
-const CLOSED_IN_PUBLIC_MODE = [
-  // Bileşen kataloğu ve karşılaştırma ekranı: ikisi de ziyaretçiye yarım
-  // kalmış bir uygulama gibi görünür. `/compare` kimlik doğrulama da
-  // istemiyor ve koşum kimliği olmadan boş bir form.
-  /^\/dev(\/|$)/,
-  /^\/compare(\/|$)/,
-  // Kurulum ucu: işini bitirdi, yayın modunda hiç var olmamalı.
-  /^\/api\/bootstrap(\/|$)/,
-]
-
 export function middleware(request: NextRequest) {
   if (process.env['ASSAY_PUBLIC_SITE'] !== 'true') return NextResponse.next()
 
   const { pathname } = request.nextUrl
-  if (!CLOSED_IN_PUBLIC_MODE.some((pattern) => pattern.test(pathname))) {
+  if (!closedInPublicMode(pathname)) {
     return NextResponse.next()
   }
 

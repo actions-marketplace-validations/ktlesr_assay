@@ -21,6 +21,7 @@ import type {
   SessionOutcome,
   TraceEvent,
   TriggerObservation,
+  Environment,
 } from './records.js'
 
 /** Tek bir attempt'in koşum yapılandırması. */
@@ -77,8 +78,24 @@ export interface SessionResult {
    * host onu vermediği sürece `systemPromptHash` boş kalır (docs/decisions.md).
    */
   environmentHash?: string
+  /**
+   * Hash'in girdisi olan ortam kaydının kendisi.
+   *
+   * Hash "bir şey değişti" diyebiliyor, "ne değişti" diyemiyor; kayan alanı
+   * adıyla söyleyebilmek için bileşenler de taşınıyor (0.3.0-a).
+   */
+  environment?: Environment
   /** Bu koşumda aktif olan skill'ler — host bildiriyorsa. */
   activeSkills?: readonly string[]
+  /**
+   * Host'un bildirdiği izin modu.
+   *
+   * Ölçümün koşuludur, süsü değil: araçları kısıtlanmış bir skill ile
+   * kısıtlanmamış olan aynı skill değildir. Adaptörün istediği mod değil,
+   * host'un **bildirdiği** mod yazılır — ikisi ayrışırsa gerçek olan ikincisi.
+   * Host bildirmiyorsa alan yok; uydurulmaz.
+   */
+  permissionMode?: string
   exitCode?: number
   files?: readonly CapturedFile[]
   env?: EnvDiff

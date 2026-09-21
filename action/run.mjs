@@ -21,6 +21,7 @@ if (suite === undefined || skill === undefined) {
 const args = ['ci', suite, '--skill', skill, '--html', '.assay/report.html']
 if (env['ASSAY_REPEAT']) args.push('--repeat', env['ASSAY_REPEAT'])
 if (env['ASSAY_MODEL']) args.push('--model', env['ASSAY_MODEL'])
+if (env['ASSAY_FAST'] === 'true') args.push('--fast')
 if (env['ASSAY_ALLOW_UNKNOWN'] === 'true') args.push('--allow-unknown')
 
 mkdirSync('.assay', { recursive: true })

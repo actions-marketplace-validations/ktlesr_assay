@@ -37,6 +37,50 @@ export class RunAlreadyStoredError extends Error {
 }
 
 /**
+ * Kayıt saklanabilir biçimde değil — ve nerede değil (0.4.1-d).
+ *
+ * İlk gerçek `assay push`ta 0.2.0 öncesi kayıtlar eşlemede bir TypeError ile
+ * düştü ve kullanıcıya yalnızca "the run could not be stored" gitti; sebep
+ * ancak kod yerel veritabanında koşturularak bulundu. Mesaj artık vakayı,
+ * denemeyi ve iz olayını adıyla söylüyor. Metin bizim eşleme kodumuzdan
+ * geliyor, veritabanından değil: tablo ya da sütun adı taşımıyor.
+ */
+export class RecordShapeError extends Error {
+  constructor(place: string, cause: unknown) {
+    super(
+      `the run record is malformed at ${place}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+    this.name = 'RecordShapeError'
+  }
+}
+
+function at<T>(place: string, map: () => T): T {
+  try {
+    return map()
+  } catch (cause) {
+    throw new RecordShapeError(place, cause)
+  }
+}
+
+/** Eşlemenin tamamı, işleme girmeden: bozuk bir kayıt yarım yazılmaz ve yerini söyler. */
+function assertShape(run: Run): void {
+  at('the run', () => toRunRow(run))
+  for (const result of at('the run', () => [...run.cases])) {
+    const inCase = `case "${String(result.caseId)}"`
+    at(inCase, () => toCaseResultRow(result))
+    for (const attempt of at(inCase, () => [...result.attempts])) {
+      const inAttempt = `${inCase}, attempt ${String(attempt.index)}`
+      at(inAttempt, () => toAttemptRow(attempt))
+      for (const event of at(inAttempt, () => [...(attempt.trace ?? [])])) {
+        at(`${inAttempt}, trace event ${String(event.seq)}`, () => toTraceEventRow(event))
+      }
+      const env = attempt.env
+      if (env !== undefined) at(`${inAttempt}, environment diff`, () => toEnvDiffRow(env))
+    }
+  }
+}
+
+/**
  * Bir koşumu ve ait olduğu vaka setini yazar.
  *
  * Tek bir işlem: yarım yazılmış bir koşum, ölçülmemiş bir vakayı "hiç
@@ -46,8 +90,9 @@ export class RunAlreadyStoredError extends Error {
 export async function storeRun(
   db: PrismaClient,
   input: { suite: Suite; suiteHash: string; run: Run; ownerId?: string | undefined },
-): Promise<{ runId: string; suiteId: string }> {
+): Promise<{ runId: string; suiteId: string; suitePublic: boolean }> {
   assertSuiteStorable(input.suite)
+  assertShape(input.run)
 
   const existing = await db.run.findUnique({ where: { id: input.run.id } })
   if (existing !== null) throw new RunAlreadyStoredError(input.run.id)
@@ -83,10 +128,31 @@ export async function storeRun(
     const cases = await tx.case.findMany({ where: { suiteId: suite.id } })
     const caseIdByName = new Map(cases.map((c) => [c.caseId, c.id]))
 
+    /*
+     * jsonb sütunları satırdan ÇIKARILIP tek tek ekleniyor.
+     *
+     * Değer yokken anahtar hiç geçilmemeli: `null` geçilirse Prisma bunu
+     * **JSON null** olarak yazar ve `IS NULL` yanlış çıkar. Aynı tuzak
+     * `TraceEvent.hook`ta da vardı. Burada iki kez düşüldü: önce `...runRow`
+     * yayılımının `partial: null`ı zaten koyduğu, koşullu eklemenin onu
+     * silmediği görüldü — o yüzden alanlar yayılımdan çıkarılıyor.
+     * `run_partial_shape` kısıtı yakaladı; normal biten her koşum
+     * reddediliyordu.
+     */
+    const { environment, partial, skipped, ...runColumns } = runRow
     await tx.run.create({
       data: {
-        ...runRow,
+        ...runColumns,
         verdict: runRow.verdict as 'PASS' | 'FAIL' | 'UNKNOWN',
+        ...(environment === null || environment === undefined
+          ? {}
+          : { environment: environment as never }),
+        ...(partial === null || partial === undefined
+          ? {}
+          : { partial: partial as never }),
+        ...(skipped === null || skipped === undefined
+          ? {}
+          : { skipped: skipped as never }),
         suiteId: suite.id,
         ...(input.ownerId === undefined ? {} : { ownerId: input.ownerId }),
       },
@@ -115,6 +181,7 @@ export async function storeRun(
           data: {
             ...attemptRow,
             verdict: attemptRow.verdict as 'PASS' | 'FAIL' | 'UNKNOWN',
+            triggerRefusals: attemptRow.triggerRefusals as never,
             caseResultId: stored.id,
           },
         })
@@ -123,11 +190,16 @@ export async function storeRun(
           await tx.traceEvent.createMany({
             data: attempt.trace.map((event) => {
               const row = toTraceEventRow(event)
+              // `hook` anahtarı yokken SQL NULL yazılıyor; `null` geçilseydi
+              // Prisma bunu **JSON null** olarak yazar ve `hook IS NULL`
+              // yanlış çıkardı — kısıt bunu yakaladı.
+              const { hook, ...rest } = row
               return {
-                ...row,
+                ...rest,
                 kind: row.kind as never,
                 outcome: row.outcome as never,
                 args: row.args as never,
+                ...(hook === null || hook === undefined ? {} : { hook: hook as never }),
                 attemptId: storedAttempt.id,
               }
             }),
@@ -155,7 +227,7 @@ export async function storeRun(
       }
     }
 
-    return { runId: input.run.id, suiteId: suite.id }
+    return { runId: input.run.id, suiteId: suite.id, suitePublic: suite.public }
   })
 }
 

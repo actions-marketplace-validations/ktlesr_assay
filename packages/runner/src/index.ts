@@ -17,6 +17,7 @@ export {
 
 export {
   createWorkspace,
+  workRoots,
   destroyWorkspace,
   snapshot,
   directoryHash,
@@ -35,3 +36,35 @@ export {
   type StoredRun,
   type StoreOptions,
 } from './store.js'
+
+export { assembleRun, verdictOf } from './assemble.js'
+export { localNames } from './identity.js'
+export { ASSAY_VERSION } from './version.js'
+
+export { killTree, killChildTree, type KillTreeResult } from './process.js'
+export {
+  superviseAttempt,
+  workerEntry,
+  type SupervisorOptions,
+  type SupervisedAttempt,
+} from './supervisor.js'
+export type { AdapterSpec, WorkerPayload } from './worker.js'
+export {
+  DEFAULT_EGRESS,
+  API_KEY_PLACEHOLDER,
+  withContainer,
+  type ContainerOptions,
+} from './container.js'
+
+export {
+  RunJournal,
+  readJournal,
+  findJournals,
+  recoverJournal,
+  JOURNAL_VERSION,
+  JOURNAL_SUFFIX,
+  type JournalHeader,
+  type JournalAttempt,
+  type JournalContents,
+  type RecoveredRun,
+} from './journal.js'

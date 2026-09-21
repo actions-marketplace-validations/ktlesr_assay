@@ -39,6 +39,13 @@ Her skill kendi plugin dizinine kuruldu
 `CLAUDE_CONFIG_DIR` açtığı için kullanıcının 119 skill'lik kurulumu devrede
 değil: her koşumda tek bir hedef skill aktif.
 
+**Düzeltme (2026-09-13).** Bu ölçümler kullanıcının `~/.claude/CLAUDE.md`'si
+bağlamdayken yapıldı: `CLAUDE_CONFIG_DIR` onu kesmiyordu, host çalışma
+dizininin üst dizinlerinde de talimat arıyor ve Windows'ta `%TEMP%` ev
+dizininin altında. Dosya tek bir ilgisiz talimat taşıyor (`/graphify`); bu
+sayfadaki kayıtlarda modelin metninde izi yok. 0.4.5'ten itibaren üst dizinler
+dışlanıyor ve yüklenen dosyalar ölçülüp kayda yazılıyor (roadmap 0.4.5).
+
 Hiçbir istemde skill adı geçmiyor. Ölçülen şey modelin istemden skill'i kendi
 seçmesi; komut çalıştırmak değil.
 
@@ -675,3 +682,136 @@ node tools/completion-report.mjs . <skill>
 ```
 
 Vaka setleri ve fixture'lar `suites/` altında.
+
+---
+
+# Paralel Koşum Ölçümü — 0.3.0-d
+
+**Soru.** 240 denemelik bir koşum `--concurrency` 1, 2 ve 4'te ne kadar sürüyor?
+
+**Yöntem.** Host tarafı sabit süreli sahte bir adaptörle taklit ediliyor
+(deneme başına 250 ms) ve aynı suite altı vaka × kırk tekrarla koşuluyor.
+Böylece ölçülen şey **Assay'in kendi ölçeklenmesi ve ek yükü**: iş listesi,
+worker açılışı, journal yazımı, süreç ağacı kapatma.
+
+Üretici: `tools/fixtures/measure-concurrency.mjs`.
+
+**Bu ölçümün söylemediği şey:** host hız sınırı. Sahte adaptör ağa çıkmıyor.
+Gerçek hız sınırı ancak paralı bir koşumla ölçülür; aşağıda ayrı başlık.
+
+| Kol | `--concurrency` | Süre | Hızlanma | Deneme | `unknown` | Deneme başına ek yük |
+|---|---|---|---|---|---|---|
+| süreç içi | 1 | 61.4 sn | 1.00x | 240 | 0 | ~6 ms |
+| süreç içi | 2 | 30.7 sn | 2.00x | 240 | 0 | ~6 ms |
+| süreç içi | 4 | 15.4 sn | 3.99x | 240 | 0 | ~6 ms |
+| izole (varsayılan) | 1 | 191.2 sn | 1.00x | 240 | 0 | ~546 ms |
+| izole (varsayılan) | 2 | 100.9 sn | 1.89x | 240 | 0 | ~591 ms |
+| izole (varsayılan) | 4 | 53.5 sn | 3.57x | 240 | 0 | ~642 ms |
+
+**Gerçek bir koşuma çevirisi.** 4.2.2 ölçümünde 240 deneme ~8 saat sürdü, yani
+deneme başına ~120 sn. Aynı iş `--concurrency 4` ile ~2 saat 5 dakikaya iner
+(3.57x); izolasyonun deneme başına ~0.6 sn'lik ek yükü bu ölçekte toplam
+~2.5 dakika, yani **%2'nin altında**. Ek yük sabit; denemenin uzunluğuyla
+büyümüyor.
+
+**Okunuşu.**
+
+- **Süreç içi** kol neredeyse doğrusal ölçekleniyor ve deneme başına ek yük
+  ~5 ms. Bu, iş listesi ve journal yazımının maliyeti.
+- **İzole** kol (ürünün varsayılanı, deneme başına bir süreç) deneme başına
+  ~0.5 sn ek yük taşıyor: worker açılışı ve süreç ağacının kapatılması.
+  Windows'ta ağaç PPID üzerinden PowerShell ile yürünüyor (0.3.0-c) ve o çağrı
+  tek başına birkaç yüz milisaniye.
+- Bu ek yük sabit, denemenin uzunluğuyla ölçeklenmiyor. 250 ms'lik sahte bir
+  denemede oran büyük görünüyor; gerçek bir denemede ajan 30–120 saniye
+  çalışıyor ve aynı 0.5 sn **%1'in altında** kalıyor. Ölçümün büyüklüğü değil,
+  oranı yanıltıcı.
+- Eş zamanlılık 4'te izole kolun hızlanması doğrusalın biraz altında: worker
+  açılışları CPU'yu paylaşıyor.
+
+**Host hız sınırı — ölçülmedi.**
+
+Yukarıdaki sayılar ağa çıkmayan bir adaptörle alındı. "Concurrency 4'te hız
+sınırına çarpıyor muyuz" sorusu ancak gerçek host'la ölçülür ve o koşum para
+harcar. Sözleşme 1 gereği tetiği kullanıcı çekiyor.
+
+Ne yapılacağı belli: aynı suite'i küçük bir tekrarla (ör. 2 vaka × 4 tekrar)
+`--concurrency 4` ile koşmak ve izde `429`/`rate limit` sinyali aramak. Tahmini
+maliyet birkaç yüz milisaniyelik değil, **birkaç dolar** mertebesinde ve süre
+birkaç dakika. Sonuç buraya, bu başlığın altına yazılacak.
+
+Bugün bilinen: bir hız sınırı yanıtı adaptör tarafında sıradan bir host hatası
+olarak görünür ve deneme `unknown` olur (değişmez #1). Yani hız sınırı ölçümü
+**bozmuyor**, yalnızca ölçülemeyen deneme sayısını artırıyor — ve bu, raporda
+ayrı bir kova olarak görünüyor.
+
+---
+
+# 0.4.0-f — marketingskills çakışma koşumu, yeni şemayla yeniden puanlandı
+
+**Soru.** `expect.winner` şeması doğru mu? Kanıt olarak yeni bir koşum değil,
+var olan gerçek bir koşum kullanıldı: aynı kanıt her zaman aynı verdict'i verir,
+ve kayıt her denemenin tetiklenme gözlemini taşıyor. Maliyeti $0.
+
+**Girdiler** (ölçüm deposu `skill-trigger-measurements`, yalnızca okundu):
+
+- kayıt `run-2026-09-10T11-01-34-914Z-0bec859e` — assay 0.3.2, 20 vaka × 10, 200 deneme
+- suite `suites/marketingskills.collide.suite.yaml` v2 — yalnız `not_triggered`
+- analizci `tools/collide.py` — beklenen kazananı vaka id'sinden okuyor
+- rapor `reports/marketingskills.collide.md` — bölüm 5: "179 pass, 21 fail; that is not the finding"
+
+**Türetilmiş suite:** `examples/measurements/marketingskills.collide.winner.suite.yaml`.
+Id'ye gömülü kazanan, `collide.py`'nin `expected()` kuralıyla `expect.winner`a
+taşındı. Vaka id'leri bayt bayt aynı. Tek anlamsal düzeltme tartışmalı vakada:
+özgün suite `not_triggered: [copy-editing]` diyordu, oysa kendi yorumu tartışmalı
+vakayı "iki açıklamanın da istediği" diye tanımlıyor; çelişen satır düşürüldü.
+
+Özgün suite yeni doğrulayıcıdan 15 uyarıyla geçiyor ("this case also passes when
+no skill triggers at all"); türetilmiş suite uyarısız.
+
+## Sonuç
+
+| | pass | fail | unknown |
+|---|---|---|---|
+| Kayıttaki (0.3.2, eski şema) | 179 | 21 | 0 |
+| Yeniden puanlanmış (0.4.0, `winner`) | **79** | **121** | 0 |
+
+- `pass` → `fail` dönen deneme: **100**. Bunlar, hiçbir `marketing-skills:`
+  skill'inin tetiklenmediği ve eskiden `pass` sayılan pozitif denemelerin
+  **tam kümesi** (küme eşitliği doğrulandı). `fail` → `pass` dönen: 0.
+- Matris, `collide.py`'nin matrisiyle karşılaştırıldı (13 satır):
+
+| Tanım | Karşılaştırılan dolu hücre | Fark |
+|---|---|---|
+| `collide.py`'nin süzgeci (yalnız `marketing-skills:` aktivasyonları), aynı Assay kodu | 17 | **0** |
+| Assay'in tanımı (ilk doğrulanmış aktivasyon, herhangi bir skill) | 18 | 2 hücre, tek deneme |
+
+Tek fark: `collide.cro.lead_form` #7'de yalnızca host'la gelen `run` skill'i
+tetiklendi. `collide.py` pazarlama dışı skill'leri saymadığı için onu "none"a
+yazıyor (cro × none = 15); Assay `run` sütununa (cro × none = 14, cro × run = 1).
+Verdict ikisinde de `fail`. Assay'in "none" sütunu gerçekten hiçbir skill'in
+tetiklenmediği anlamına geliyor; bir host skill'inin isteği kapması da bir
+çakışma bulgusu (karar: decisions.md, 2026-09-10).
+
+`collide.py` matrisinde olmayan iki satır, onun tablo 1'iyle tutarlı:
+tartışmalı `copywriting / copy-editing` → none × 10, `none` (negatifler) → none × 30.
+
+## Yeniden üretmek
+
+```
+npx tsc -b
+node tools/rescore.mjs <kayit.json> examples/measurements/marketingskills.collide.winner.suite.yaml
+node tools/rescore.mjs <kayit.json> examples/measurements/marketingskills.collide.winner.suite.yaml --json
+```
+
+Hücre hücre karşılaştırma `collide.py`'nin kendi fonksiyonlarını içe aktarıyor
+ve aynı Assay kodunu süzülmüş bir kayıtla ikinci kez koşuyor.
+
+## Görsel doğrulamada bulunanlar
+
+HTML raporu bu gerçek kayıttan çizildi. 420 px'de sayfa yana taşıyordu; matris
+değil, 0.4.0'dan önce de var olan iki şey yüzünden: vaka tablosu ve kırılmayan
+pin değerleri (hash'ler). İkisi düzeltildi. Matrisin ilk sütunu yapışkan yapıldı:
+15 sütun yana kaydırılınca satır etiketleri kayboluyordu. Terminal çıktısında
+ortak önek, host'la gelen tek bir öneksiz ad (`run`) yüzünden hiç atılmıyordu ve
+300 karakterlik satır üretiyordu; kural daraltıldı.

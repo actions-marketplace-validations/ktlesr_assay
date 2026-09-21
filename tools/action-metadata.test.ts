@@ -15,6 +15,23 @@ import { describe, expect, it } from 'vitest'
 const raw = existsSync('action.yml') ? readFileSync('action.yml', 'utf8') : null
 const action = raw === null ? null : (parse(raw) as Record<string, unknown>)
 
+/**
+ * İki sürümü sayısal olarak karşılaştırır: `a < b` → negatif, eşit → 0.
+ *
+ * Sözlük sırası kullanılamaz: `'0.10.0' < '0.9.0'` doğru çıkar ve kural sessizce
+ * tersine döner.
+ */
+export function compareSemver(a: string, b: string): number {
+  const parts = (value: string) => value.split('.').map((piece) => Number(piece))
+  const left = parts(a)
+  const right = parts(b)
+  for (let i = 0; i < 3; i += 1) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
+
 describe('marketplace koşulları', () => {
   it('eylem tanımı deponun KÖKÜNDE', () => {
     // Marketplace kökte arıyor. `action/action.yml` çalışan bir eylemdi ama
@@ -68,12 +85,49 @@ describe('marketplace koşulları', () => {
     const inputs = action?.['inputs'] as Record<string, { default?: string }>
     const pinned = String(inputs['assay-version']?.default ?? '')
     expect(pinned).toMatch(/^\d+\.\d+\.\d+$/)
-    // Pin, yayımlanmış sürümle aynı olmalı: eylem var olmayan bir sürümü
-    // kurmaya çalışırsa her koşum kurulum hatasıyla düşer.
-    const published = JSON.parse(readFileSync('packages/cli/package.json', 'utf8')) as {
+  })
+
+  /*
+   * Pin, deponun sürümünden GERİDE olamaz — ama ileride olabilir.
+   *
+   * Eskiden tam eşitlik aranıyordu ve bu, yayın sırasıyla çelişiyordu:
+   * manifest önce hareket ediyor (sürüm PR'ı), npm sonra (elle tetiklenen
+   * yayın koşumu). Aradaki pencerede pin, henüz yayımlanmamış bir sürümü
+   * gösteriyor ve tam eşitlik testi depoyu kırmızıya çeviriyordu — ölçülen
+   * şey bir kusur değil, hattın kendi sırasıydı.
+   *
+   * Tutulan asıl kural yönlü: pin geride kalırsa eylem, deponun ürettiğinden
+   * ESKİ bir CLI kuruyor demektir ve bu sessizce yanlış ölçüm üretir —
+   * `assay scrub` olmayan bir sürüm maskelenmemiş kayıt yükler, 0.1.3 öncesi
+   * bir sürüm kimlik hatasını `fail` diye raporlar. Bu yüzden geride kalmak
+   * hata, ileride olmak değil.
+   *
+   * npm'e bakılmıyor, bilerek: bir birim testinin ağa çıkması onu
+   * kararsızlaştırırdı ve zaten yayın penceresi boyunca kırmızı verirdi.
+   * Tavan açık — 9.9.9 gibi bir yazım hatası burada yakalanmaz; onu yayın
+   * sonrası `verify-published.mjs` ve eylemin kendi kurulum adımı yakalar.
+   */
+  it('pin deponun sürümünden geride değil', () => {
+    const inputs = action?.['inputs'] as Record<string, { default?: string }>
+    const pinned = String(inputs['assay-version']?.default ?? '')
+    const manifest = JSON.parse(readFileSync('packages/cli/package.json', 'utf8')) as {
       version: string
     }
-    expect(pinned).toBe(published.version)
+    expect(
+      compareSemver(pinned, manifest.version),
+      `action.yml pini ${pinned}, depo sürümü ${manifest.version}: pin geride kalamaz`,
+    ).toBeGreaterThanOrEqual(0)
+  })
+
+  it('kural yönlü: geri sürüm hata, ileri sürüm değil', () => {
+    // Kuralın kendisi sınanıyor — testin yalnızca bugünkü değerlerle
+    // yeşil olması, yönünün doğru olduğunu göstermez.
+    expect(compareSemver('0.1.3', '0.2.0')).toBeLessThan(0) // geride → hata
+    expect(compareSemver('0.2.0', '0.2.0')).toBe(0) // eşit → kabul
+    expect(compareSemver('0.2.1', '0.2.0')).toBeGreaterThan(0) // ileride → kabul
+    // Sözlük sırası burada yanılırdı: '0.10.0' < '0.9.0' der.
+    expect(compareSemver('0.10.0', '0.9.0')).toBeGreaterThan(0)
+    expect(compareSemver('1.0.0', '0.99.99')).toBeGreaterThan(0)
   })
 
   it('gizli girdiler kütüğe yazılmıyor', () => {

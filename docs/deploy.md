@@ -29,13 +29,14 @@ koşarken `1` olmalı.
 
 ## Yayın modu — yalnızca tanıtım ve yayımlanmış ölçümler
 
-`ASSAY_PUBLIC_SITE=true` iken şu rotalar 404 döner: `/admin`, `/settings`,
-`/signin`, `/compare`, `/dev`, `/api/auth`. Landing'deki giriş düğmesi ve
-başlıktaki oturum bağlantısı da gizlenir.
+`ASSAY_PUBLIC_SITE=true` iken yalnızca `/dev` ve `/api/bootstrap` 404 döner
+(`apps/web/lib/public-mode.ts`). `/signin`, `/admin` ve `/settings` kimlik
+doğrulama arkasında açık kalır (decisions.md, 2026-09-02). Landing'deki giriş
+düğmesi ve başlıktaki oturum bağlantısı gizlenir.
 
-Açık kalanlar: `/` (tanıtım), `/runs` ve `/suites` (yalnızca `public: true`
-vaka setleri), `/api/health`, `/api/runs` (token ile korunuyor — kapatılırsa
-siteye yeni ölçüm yüklenemez).
+Açık kalanlar: `/` (tanıtım), `/runs`, `/suites` ve `/compare` (yalnızca
+`public: true` vaka setleri; `/compare` 0.4.1'de açıldı), `/api/health`,
+`/api/runs` (token ile korunuyor — kapatılırsa siteye yeni ölçüm yüklenemez).
 
 Sebep ürünle ilgili: assayctl.dev'e gelen kişi bir SaaS'a değil, bir ölçüm
 aracının tanıtımına ve gerçek bir koşum çıktısına bakıyor. Boş bir admin

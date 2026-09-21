@@ -12,9 +12,7 @@
 
 name: Assay — Agent Skill measurement
 description: >
-  Measure whether an Agent Skill fires when it should, stays quiet when it
-  shouldn't, and still does tomorrow what it did today. Every rate reports its
-  sample size and confidence interval.
+  A CI test runner for Agent Skills: does your skill still fire?
 author: Assay contributors
 
 branding:
@@ -34,6 +32,14 @@ inputs:
   model:
     description: Model id override. Leave empty to use the suite's pinned model.
     required: false
+  fast:
+    description: >
+      Early warning, not evidence: 3 attempts per case and the trigger layer
+      only. Cases that only declare assertions are not run. Use it on pull
+      requests and keep the full run for nightly and pre-release. Needs an
+      assay-version that has the flag.
+    required: false
+    default: 'false'
   allow-unknown:
     description: Treat "nothing could be measured" as success instead of failing.
     required: false
@@ -80,7 +86,17 @@ inputs:
     # 0.1.3 ölçülmeyen koşumu her katmanda `unknown` yapıyor: host oturumu
     # açamadığında iş artık 1 ile değil 3 ile çıkıyor. Kimlik bilgisi sorunu
     # kırık skill gibi raporlanmıyor.
-    default: '0.1.3'
+    #
+    # 0.2.0 tetiklenmeyi aktivasyonun doğrulanmasına bağlıyor: reddedilen bir
+    # `Skill` çağrısı artık tetiklenme sayılmıyor ve `unknown` üretiyor. Daha
+    # eski bir sürüm verilirse eylem, reddedilen aktivasyonları tetiklenme
+    # diye raporlar — sessizce yanlış bir precision.
+    #
+    # Pin, depo sürümüyle birlikte SÜRÜM PR'ında yükseliyor, yayından önce.
+    # Yani birleştirme ile yayın arasında burası npm'de henüz olmayan bir
+    # sürümü gösteriyor. Bu pencere kasıtlı ve kısa; sırayı tersine çevirmek
+    # pini kalıcı olarak bir sürüm geride bırakırdı.
+    default: '0.4.6'
   claude-code-version:
     description: Version of @anthropic-ai/claude-code to install as the host.
     required: false
@@ -153,6 +169,7 @@ runs:
         ASSAY_SKILL: ${{ inputs.skill }}
         ASSAY_REPEAT: ${{ inputs.repeat }}
         ASSAY_MODEL: ${{ inputs.model }}
+        ASSAY_FAST: ${{ inputs.fast }}
         ASSAY_ALLOW_UNKNOWN: ${{ inputs.allow-unknown }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}

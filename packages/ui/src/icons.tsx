@@ -142,6 +142,22 @@ export function IconSkill(props: IconProps) {
   )
 }
 
+/**
+ * Hook — host'un koşuma iliştirdiği kanca.
+ *
+ * Skill'in kendisi değil, ölçümün etrafındaki bir şey: bu yüzden dolu değil,
+ * çizgisel ve akışın yanına asılı duran bir biçim.
+ */
+export function IconHook(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.5v6a2.75 2.75 0 0 1-5.5 0" />
+      <path d="M8 2.5h5.5" />
+      <path d="M11.5 12.5h3" />
+    </Icon>
+  )
+}
+
 /** Oturum bitti. */
 export function IconEnd(props: IconProps) {
   return (

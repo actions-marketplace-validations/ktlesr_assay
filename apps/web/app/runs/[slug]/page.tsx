@@ -1,4 +1,4 @@
-import { type Attempt, type CaseResult, type RunSummary } from '@ktlsr/assay-core'
+import { type Attempt, type CaseResult, type Run, type RunSummary } from '@ktlsr/assay-core'
 import {
   Badge,
   Callout,
@@ -10,8 +10,13 @@ import {
 } from '@ktlsr/assay-ui'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { CollisionMatrixSection } from '../../components/collision-matrix'
+import { CoverageNotices } from '../../components/coverage-notices'
+import { HostMemoryNote } from '../../components/host-memory-note'
 import { Pins } from '../../components/run-meta'
 import { Shell } from '../../components/shell'
+import { baselineFor } from '../../../lib/baseline'
+import { unknownBecause } from '../../../lib/coverage'
 import { getRun, getSuite } from '../../../lib/runs'
 
 /**
@@ -29,7 +34,11 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
 
   const { run, summary } = item
   const suite = await getSuite(run.skill)
-  const previous = suite?.runs.find((r) => r.run.startedAt < run.startedAt)
+  // Bağlantı yalnızca aynı koşullarda ölçülmüş bir koşuma "compare" der.
+  const baseline = baselineFor(
+    run,
+    (suite?.runs ?? []).filter((r) => r.run.startedAt < run.startedAt),
+  )
 
   const flaky = run.cases.filter((c) => c.passed > 0 && c.failed > 0)
   const unmeasured = [
@@ -41,10 +50,17 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
     ).values(),
   ]
   const unmeasuredCount = run.cases.reduce((total, c) => total + c.unknown, 0)
+  // Çakışma suite'inde bu iki oran yalnızca suite'in hedef skill'ini anlatıyor.
+  const targetOnly = summary.collision === undefined ? '' : ' · target skill only'
+  // Kesinliğin paydası boş ama sinyal okundu: skill hiç tetiklenmedi (0.4.1-l).
+  const neverFired =
+    summary.trigger.precision.n === 0 &&
+    run.cases.some((c) => c.attempts.some((a) => a.trigger.available))
 
   return (
     <Shell
       breadcrumbs={[
+        { label: 'measurements', href: '/suites' },
         { label: run.skill, href: `/suites/${encodeURIComponent(run.skill)}` },
         { label: 'run' },
       ]}
@@ -52,7 +68,7 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
       <Determination
         verdict={run.verdict}
         subject={run.skill}
-        sentence={verdictSentence(run.verdict, summary)}
+        sentence={verdictSentence(run.verdict, summary, run)}
         meta={
           <>
             <span>{run.startedAt.slice(0, 10)}</span>
@@ -64,8 +80,16 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
         }
       />
 
+      {/* Kapsam: hızlı mod, koşulmayan vakalar, yarım kayıt — sayılardan önce (0.4.3-b). */}
+      <CoverageNotices run={run} />
+
+      {/* Çakışma suite'inde asıl cevap matris; altındaki iki oran yalnızca hedef skill (0.4.1-1). */}
+      {summary.collision === undefined ? null : (
+        <CollisionMatrixSection matrix={summary.collision} />
+      )}
+
       <MeasurementBlock
-        label="Fired when it should have"
+        label={`Fired when it should have${targetOnly}`}
         value={summary.trigger.recall}
         verb="fired"
         tone={summary.trigger.recall.rate === 1 ? 'text-pass' : 'text-fail'}
@@ -73,10 +97,19 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
 
       <div className="border-t border-rule">
         <MeasurementBlock
-          label="Was right when it fired"
+          label={`Was right when it fired${targetOnly}`}
           value={summary.trigger.precision}
           verb="was right"
           delayMs={70}
+          {...(neverFired
+            ? {
+                empty: {
+                  count: 'never fired',
+                  reason:
+                    'The skill did not fire in any attempt that was read, so there is nothing it could have been right or wrong about.',
+                },
+              }
+            : {})}
           tone={summary.trigger.precision.rate === 1 ? 'text-pass' : 'text-fail'}
         />
       </div>
@@ -150,15 +183,29 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
       <section className="mb-12">
         <p className="rule-label mb-4">Conditions</p>
         <p className="mb-6 max-w-[62ch] text-sm text-text-muted">
-          Two runs are comparable only when all six of these are identical. A score that
+          Two runs are comparable only when all of these are identical. A score that
           moved because the model changed is not a regression in the skill.
         </p>
         <Pins run={run} />
-        {previous === undefined ? null : (
-          <p className="mt-8">
-            <Link href={`/compare?a=${previous.slug}&b=${slug}`} className="link text-sm">
-              Compare with the previous run
-            </Link>
+        <HostMemoryNote run={run} />
+        {baseline === null ? null : (
+          <p className="mt-8 text-sm">
+            {baseline.kind === 'differs' ? (
+              <>
+                <span className="text-text-muted">
+                  No earlier run was measured under the same conditions.{' '}
+                </span>
+                <Link href={`/compare?a=${baseline.slug}&b=${slug}`} className="link">
+                  See what changed since the previous run
+                </Link>
+              </>
+            ) : (
+              <Link href={`/compare?a=${baseline.slug}&b=${slug}`} className="link">
+                {baseline.adjacent
+                  ? 'Compare with the previous run'
+                  : `Compare with the last run under the same conditions (${baseline.startedAt.slice(0, 16).replace('T', ' ')})`}
+              </Link>
+            )}
           </p>
         )}
       </section>
@@ -201,9 +248,11 @@ export default async function RunPage({ params }: { params: Promise<{ slug: stri
 }
 
 /** Hükmün düz cümlesi. Sayfadan tek bir şey okunacaksa bu okunur. */
-function verdictSentence(verdict: string, summary: RunSummary): string {
+function verdictSentence(verdict: string, summary: RunSummary, run: Run): string {
   const t = summary.trigger
   if (verdict === 'unknown') {
+    const because = unknownBecause(run)
+    if (because !== null && summary.counts.unknown === 0) return because
     return `${summary.counts.unknown} of ${summary.counts.pass + summary.counts.fail + summary.counts.unknown} attempts produced no readable signal, so this run measured nothing conclusive.`
   }
   if (verdict === 'pass') {

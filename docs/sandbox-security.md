@@ -36,6 +36,8 @@ gözlemliyor ve raporluyor. Bu rapor o sınırı ölçüyor.
 | M2 | Orta | Ajana kullanıcının canlı skill dizini veriliyordu | ✅ kapatıldı |
 | A1 | Kabul edilen | Dosya sistemi ve ağ sınırı host'un izin katmanına dayanıyor | ⚠️ açık, belgelendi |
 | A2 | Kabul edilen | Disk ve CPU kotası yok | ⚠️ açık, belgelendi |
+| A3 | Kabul edilen | Ölçülen ajan bu makinedeki süreçlere erişebiliyor | ⚠️ açık, 0.3.0-c'de sınırlandı |
+| H5 | Yüksek | Kullanıcının talimat dosyası (`~/.claude/CLAUDE.md`) ölçülen bağlama giriyordu | ✅ 0.4.5'te kapatıldı ve ölçülüyor |
 
 ---
 
@@ -150,6 +152,26 @@ ajana kopya veriliyor, koşum sonunda siliniyor. Pin 1'in içerik hash'i
 
 ---
 
+### H5 — Kullanıcının talimat dosyası ölçülen bağlama giriyordu (Yüksek)
+
+**Bulgu (2026-09-13).** Bu rapor "Host config: attempt başına ayrı
+`CLAUDE_CONFIG_DIR` ✅" diyordu ve bu, kullanıcının CLAUDE.md'sinin devrede
+olmadığı anlamında okunuyordu. Değildi: Claude Code çalışma dizininden köke kadar
+her dizinde talimat dosyası arıyor ve Windows'ta `%TEMP%` ev dizininin altında.
+`~/.claude/CLAUDE.md` her denemede bağlamdaydı; bir denemede ajan o dosyayı
+okuyup düzenlemeye kalktı (host'un izin katmanı durdurdu, dosya değişmedi — A1'in
+dayandığı katman).
+
+**Kapatma.** Üç katman (roadmap 0.4.5): çalışma dizini ev dışında; çalışma
+dizininin her üst dizinindeki talimat yerleri `claudeMdExcludes` ile dışlanıyor;
+yüklenen her dosya host'un `InstructionsLoaded` kancasıyla ölçülüp
+`environment.memory` olarak kayda ve ortam hash'ine giriyor. Ders:
+**ölçülmemiş izolasyon izolasyon değil.** Bu raporun kendi tablosu bir varsayımı
+✅ olarak işaretlemişti.
+
+**Kalan.** Yönetilen (policy) talimat dosyaları dışlanamıyor; ölçüm onları kayda
+yazıyor.
+
 ## Kabul edilen riskler
 
 Bunlar kapatılmadı. Kapatılmamış olmaları bir eksiklik değil, bilinçli bir
@@ -192,6 +214,7 @@ Rapor bunu ayrı bir başlık olarak sorguladı; sonuç temiz:
 |---|---|
 | Çalışma dizini | Attempt başına ayrı `mkdtemp`, sonunda siliniyor ✅ |
 | Host config | Attempt başına ayrı `CLAUDE_CONFIG_DIR` ✅ |
+| Host talimat dosyaları | **0.4.5'e kadar ❌** — çalışma dizininin üstündeki CLAUDE.md'ler yükleniyordu. Artık üst dizinler dışlanıyor ve yüklenen her dosya kayda yazılıyor ✅ (H5) |
 | Skill dizini | Koşum başına kopya, ajan kaynağa dokunamıyor ✅ (M2) |
 | Ortam değişkenleri | Allowlist, süreçler arası taşıma yok ✅ (H1) |
 | Koşum kaydı | Attempt'ler ayrı yazılıyor ✅ |
@@ -230,3 +253,62 @@ Kalan boşluk: alt sürecin *gerçekten* bu ortamı gördüğü uçtan uca
 kanıtlanmadı — bunun için sahte bir host çalıştırılabiliri gerekiyor.
 Fonksiyon ile çağrı yeri arasındaki tek satır (`...passthroughEnv()`) kod
 incelemesine bırakıldı.
+
+---
+
+## A3 — Ölçülen ajan bu makinedeki süreçlere erişebiliyor (0.3.0-c'de sınırlandı)
+
+**Durum:** ⚠️ açık, belgelendi — daraltıldı, kapatılmadı.
+
+**Ne oldu.** Ölçülen ajan, işini doğrulamak için başlattığı dev sunucuları
+**porta göre** öldürüyor; runner aynı makinede, aynı kullanıcı altında sıradan
+bir `node` süreci. `impeccable` 4.2.2 ölçümünde koşum iki kez bu şekilde öldü
+ve ~40 dakika ile ~$4 gitti (docs/blockers.md). Aynısı 4.2.1'de de olmuştu.
+
+**Kendi payımız.** Yetimleri Assay üretiyordu: adaptör zaman aşımında yalnızca
+doğrudan çocuğu öldürüyordu, `claude`nin başlattığı sunucular hayatta
+kalıyordu. Bir sonraki denemenin ajanı portu dolu buluyor ve porta göre
+öldürmeye girişiyordu — döngünün ilk halkası bizdik.
+
+**0.3.0-c'de yapılan.**
+
+1. Her deneme kısa ömürlü bir **worker sürecinde** koşuyor. Öldürülen şey
+   koşumun tamamı değil bir deneme oluyor; sevk katmanı onu `unknown` yazıp
+   devam ediyor (değişmez #1: ölçüm yapılmadı, başarısız olmadı).
+2. Worker sonucu yazdıktan sonra **kendi kendine çıkmıyor**, canlı bekliyor ve
+   sevk katmanı onu ağacıyla birlikte kapatıyor. Ağaç ancak kök süreç canlıyken
+   güvenilir biçimde yürünebiliyor.
+3. Ağaç Windows'ta PPID üzerinden özyinelemeli kapatılıyor. `taskkill /T`
+   yetmedi ve bu ölçüldü: `detached` başlatılmış bir torun onunla ölmüyor.
+
+**Ölçüldü.** İki kol, ikisi de gerçek süreçlerle; dış bir aktör PID'i bulup
+öldürüyor (`tools/fixtures/measure-isolation.mjs`):
+
+| Kol | Koşum | Kayda giren deneme | `unknown` | Öldürme | Yetim |
+|---|---|---|---|---|---|
+| süreç içi | **düştü** (exit -1) | 0 | — | 1 | yok |
+| izole (0.3.0-c) | sağ | 4 | 2 | 2 | yok |
+
+Yani: bir öldürme, koşumun tamamı yerine bir denemeye mal oluyor.
+
+**Neyi kapatmıyor — tavan.**
+
+- Sevk katmanı da aynı makinede bir `node` süreci. `taskkill /F /IM node.exe`
+  ya da PID'i bilen herhangi bir çağrı onu da öldürür. Bu durumda koşum durur;
+  o ana kadar tamamlanmış denemeler journal'da kalır (0.3.0-b) ve
+  `assay recover` ile kayda çevrilir. Test bunu ölçüyor.
+- Worker'ın ölmesiyle ölçüm arasındaki fark ajanın niyetine bakmıyor: kasıtlı
+  öldürme ile bir çökme aynı görünüyor. İkisi de `unknown`, gerekçe metni
+  ihtimalleri sayıyor.
+- Ağaç kapatma "en iyi çaba": PID yeniden kullanımı, izin reddi ve
+  kapatılamayan bir süreç mümkün. Sonuç `treeKilled` alanında dürüstçe
+  bildiriliyor, "kapatıldı" diye varsayılmıyor.
+- **Hiçbir yerde "korunuyor" denmiyor.** Denen şey: kayıp bir denemeyle
+  sınırlanıyor. Gerçek izolasyon konteynerle gelir ve A1 ile birlikte Faz
+  3'tedir.
+
+**Yan bulgu (Windows).** `detached` OLMAYAN bir torun zaten Node'un (libuv'un)
+job object'i sayesinde ebeveyniyle birlikte ölüyor. Testin ilk hâli bu yüzden
+yanlış sebeple yeşildi: ağaç kapatma kaldırıldığında bile geçiyordu. Yetim
+`detached` yapılınca gerçek durum ortaya çıktı. Ölçtüğünü sandığı şeyi ölçmeyen
+bir testin nasıl göründüğüne dair iyi bir örnek.

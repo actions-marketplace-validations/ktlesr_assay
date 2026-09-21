@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { containsHomePath, containsSecret, redact, redactDeep } from './redact.js'
+import {
+  containsHomePath,
+  containsName,
+  containsSecret,
+  redact,
+  redactDeep,
+} from './redact.js'
 
 describe('sır maskeleme', () => {
   it('bilinen anahtar biçimlerini maskeler', () => {
@@ -74,5 +80,70 @@ describe('ev dizini maskeleme', () => {
       String.raw`C:\Users\<user>\Temp\app\index.html`,
     )
     expect(clean[1]?.text).toBe('I read /home/<user>/notes.md first.')
+  })
+})
+
+/**
+ * `scrub`un gerçek kayıtlarda kaçırdığı üç biçim (0.4.1-b, 2026-09-10).
+ * Seçilen sekiz kayıtta 68 kullanıcı adı bu biçimlerde kalmıştı; örnekler o
+ * kayıtlardan, ad `ada` ile değiştirilerek alındı.
+ */
+describe('scrub kaçakları', () => {
+  it('ters bölüleri yenmiş yolu maskeler', () => {
+    // Ajanın kabuğu `C:\Users\ada\AppData` yazımını düzleştirmişti.
+    const text =
+      "ls: cannot access 'C:UsersadaAppDataLocalTempassay-attempt-x': No such file"
+    expect(redact(text)).toBe(
+      "ls: cannot access 'C:Users<user>AppDataLocalTempassay-attempt-x': No such file",
+    )
+    expect(containsHomePath(text)).toBe(true)
+  })
+
+  it('profil klasörü tanınmıyorsa maskeyi yolun sonuna kadar uzatır', () => {
+    expect(redact("'C:Usersada.claudeprojects' done")).toBe("'C:Users<user>' done")
+  })
+
+  it('Claude Code proje adındaki kullanıcı adını maskeler', () => {
+    const slash = '/tmp/assay-cc-93QS4f/projects/C--Users-ada/memory'
+    expect(redact(slash)).toBe('/tmp/assay-cc-93QS4f/projects/C--Users-<user>/memory')
+    expect(redact(String.raw`cc\projects\C--Users-ada\memory`)).toBe(
+      String.raw`cc\projects\C--Users-<user>\memory`,
+    )
+  })
+
+  it('kod dizgesindeki çift kaçışlı yolu maskeler', () => {
+    // JSON'da dört, dizgede iki ters bölü: ajanın yazdığı JS literali.
+    const text = String.raw`fs.createWriteStream('C:\\Users\\ada\\AppData\\Local\\out.log')`
+    expect(text).toContain('\\\\Users\\\\')
+    expect(redact(text)).toBe(
+      String.raw`fs.createWriteStream('C:\\Users\\<user>\\AppData\\Local\\out.log')`,
+    )
+  })
+
+  it('üç biçimin maskelenmiş hâlini yeniden maskelemez', () => {
+    const once = redact(String.raw`C:UsersadaAppData C--Users-ada/m C:\\Users\\ada\\x`)
+    expect(redact(once)).toBe(once)
+    expect(containsHomePath(once)).toBe(false)
+  })
+})
+
+describe('bilinen ad', () => {
+  it('desenlerin tavanını kapatır: tireli ve noktalı ad', () => {
+    const names = ['ada.lovelace']
+    expect(redact('C--Users-ada-lovelace/memory', { names })).toBe(
+      'C--Users-<user>/memory',
+    )
+    expect(redact('C:Usersada.lovelaceNotes', { names })).toBe('C:Users<user>Notes')
+  })
+
+  it('genel hesap adını bilinen ad olarak da maskelemez', () => {
+    expect(redact('/home/runner/x', { names: ['runner'] })).toBe('/home/runner/x')
+  })
+
+  it('yol dışındaki geçişi maskelemez ama bildirir', () => {
+    const text = 'Author: Ada <ada@example.com>'
+    expect(redact(text, { names: ['ada'] })).toBe(text)
+    expect(containsName(text, ['ada'])).toBe(true)
+    expect(containsName('the adapter loaded', ['ada'])).toBe(false)
   })
 })

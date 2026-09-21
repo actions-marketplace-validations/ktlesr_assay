@@ -1,0 +1,75 @@
+[
+  {
+    "level": 1,
+    "wall_s": 170,
+    "total_peak_cpu_pct": 119,
+    "total_peak_mem_mib": 684,
+    "containers": [
+      {
+        "name": "k0cap-real-p1-0",
+        "peak_cpu_pct": 119,
+        "peak_mem_mib": 684,
+        "peak_pids": 107,
+        "disk": "919MB (virtual 2.84GB)"
+      }
+    ]
+  },
+  {
+    "level": 2,
+    "wall_s": 317,
+    "total_peak_cpu_pct": 137,
+    "total_peak_mem_mib": 998,
+    "containers": [
+      {
+        "name": "k0cap-real-p2-0",
+        "peak_cpu_pct": 6,
+        "peak_mem_mib": 212,
+        "peak_pids": 41,
+        "disk": "2.45MB (virtual 1.93GB)"
+      },
+      {
+        "name": "k0cap-real-p2-1",
+        "peak_cpu_pct": 137,
+        "peak_mem_mib": 998,
+        "peak_pids": 212,
+        "disk": "938MB (virtual 2.86GB)"
+      }
+    ]
+  },
+  {
+    "level": 4,
+    "wall_s": 128,
+    "total_peak_cpu_pct": 111,
+    "total_peak_mem_mib": 1312,
+    "containers": [
+      {
+        "name": "k0cap-real-p4-0",
+        "peak_cpu_pct": 101,
+        "peak_mem_mib": 433,
+        "peak_pids": 68,
+        "disk": "120MB (virtual 2.05GB)"
+      },
+      {
+        "name": "k0cap-real-p4-1",
+        "peak_cpu_pct": 75,
+        "peak_mem_mib": 439,
+        "peak_pids": 77,
+        "disk": "120MB (virtual 2.05GB)"
+      },
+      {
+        "name": "k0cap-real-p4-2",
+        "peak_cpu_pct": 90,
+        "peak_mem_mib": 506,
+        "peak_pids": 83,
+        "disk": "228MB (virtual 2.15GB)"
+      },
+      {
+        "name": "k0cap-real-p4-3",
+        "peak_cpu_pct": 5,
+        "peak_mem_mib": 225,
+        "peak_pids": 43,
+        "disk": "2.69MB (virtual 1.93GB)"
+      }
+    ]
+  }
+]

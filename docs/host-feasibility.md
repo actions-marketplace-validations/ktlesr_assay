@@ -47,7 +47,7 @@ Kontrol kaldıraçları da var ve çalışıyor:
 | Kaldıraç | Ne yapar | Durum |
 |---|---|---|
 | `--plugin-dir <path>` | Skill'i yalnızca bu oturuma yükler | ✅ doğrulandı — `plugins` listesinde `assay-probe@inline` göründü |
-| `CLAUDE_CONFIG_DIR=<temiz dizin>` | Kullanıcının global skill'lerini devre dışı bırakır | ✅ doğrulandı — skill sayısı **119 → 19**'a düştü, `plugins` yalnızca `assay-probe` |
+| `CLAUDE_CONFIG_DIR=<temiz dizin>` | Kullanıcının global skill'lerini devre dışı bırakır | ✅ doğrulandı — skill sayısı **119 → 19**'a düştü, `plugins` yalnızca `assay-probe`. **Kullanıcının CLAUDE.md'sini kesmez** (2026-09-13): host çalışma dizininin üst dizinlerinde de talimat arıyor; Windows'ta `%TEMP%` ev altında. 0.4.5'te üst dizinler `claudeMdExcludes` ile dışlanıyor ve yüklenen dosyalar `InstructionsLoaded` kancasıyla ölçülüyor |
 | `--disable-slash-commands` | Tüm skill'leri kapatır | 📄 belgeden |
 | `--bare` | Plugin sync, CLAUDE.md keşfi, auto-memory kapalı | ⚠️ **ANTHROPIC_API_KEY gerektirir** (aşağıya bakınız) |
 

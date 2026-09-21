@@ -122,6 +122,8 @@ export const PARTIAL_TRACE: MockScenario = {
     available: true,
     triggered: true,
     skills: ['docx'],
+    refused: false,
+    refusals: [],
     complete: true,
     via: 'markers',
   },
@@ -139,6 +141,30 @@ export const CRASHED_SESSION: MockScenario = {
   },
   trace: [{ seq: 1, kind: 'session_end', outcome: 'error' }],
   result: { outcome: 'error', exitCode: 1 },
+}
+
+/**
+ * Model skill'i seçti ama host aktivasyonu reddetti.
+ *
+ * Ne tetiklenme ne tetiklenmeme: ölçüm yapılmadı. Pozitif de negatif de
+ * `unknown` almalı.
+ */
+export const REFUSED_ACTIVATION: MockScenario = {
+  trigger: {
+    available: true,
+    triggered: false,
+    skills: [],
+    refused: true,
+    refusals: [
+      {
+        skill: 'docx',
+        reason: 'the host denied permission for the Skill call, so the skill never loaded',
+      },
+    ],
+    complete: true,
+    via: 'markers',
+  },
+  trace: [{ seq: 1, kind: 'session_end', outcome: 'completed' }],
 }
 
 /** Host `start` sırasında patlıyor. */

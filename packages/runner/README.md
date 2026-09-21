@@ -29,7 +29,7 @@ its own socket is not seen. Where the boundary cannot be observed the run
 records that fact and the affected assertion becomes `unknown` — a shell
 command, for instance, is not readable as a set of writes, so side-effect
 claims around it are not scored. The ceiling is documented rather than papered
-over; see [sandbox-security.md](https://github.com/ktlesr/assay/blob/main/docs/sandbox-security.md).
+over; see [sandbox-security.md](https://github.com/ktlesr/assay/blob/main/docs/sandbox-security.md) (Turkish).
 
 **Pins the run.** `pinsOf` and `suiteHash` record the four pins a later
 comparison requires, including hashes computed from actual content rather than
@@ -44,7 +44,7 @@ database and no hosted service is required for any of this.
 A host adapter implements `HostAdapter` from `@ktlsr/assay-core`. Every method
 is `async`, so a synchronous throw still surfaces as a rejected promise and the
 runner can handle failure in one place. See
-[docs/adapters.md](https://github.com/ktlesr/assay/blob/main/docs/adapters.md).
+[docs/adapters.md](https://github.com/ktlesr/assay/blob/main/docs/adapters.md) (Turkish).
 
 `@ktlsr/assay-runner/testing` exports a `MockAdapter`. It is a test tool. It is
 deliberately kept off the main entry point and a repository test fails if any

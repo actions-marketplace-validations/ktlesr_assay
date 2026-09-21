@@ -9,6 +9,9 @@ export {
   parseSuite,
   validateSuite,
   suiteSchema,
+  expectedWinnerOf,
+  isNegativeCase,
+  WINNER_NONE,
   FILE_FORMATS,
   TRACE_RULES,
   type Suite,
@@ -21,17 +24,33 @@ export {
 } from './suite.js'
 
 export {
+  assayVersionLabel,
+  hostMemoryLabel,
+  containerLabel,
+  memoryFromOutside,
+  activationUnverified,
+  ACTIVATION_UNVERIFIED,
+  PRE_VERSION_STAMP,
   comparePins,
+  diffEnvironments,
   proportion,
   formatProportion,
   type Verdict,
   type VerdictDetail,
   type Pins,
   type PinComparison,
+  type Environment,
+  type ContainerEnvironment,
+  type EnvironmentChange,
+  type PartialRun,
+  type RunLayer,
+  type SkippedCase,
   type TraceEvent,
   type TraceEventKind,
   type SessionOutcome,
+  type HookRecord,
   type TriggerObservation,
+  type RefusedActivation,
   type NetworkRequest,
   type EnvDiff,
   type CapturedFile,
@@ -63,6 +82,12 @@ export {
   totals,
   summarize,
   summarizeRun,
+  collisionMatrix,
+  collisionPrefix,
+  outsidePrefix,
+  NO_SKILL,
+  type CollisionMatrix,
+  type CollisionRow,
   type VerdictCounts,
   type TriggerObservationPoint,
   type TriggerAccuracy,
@@ -81,6 +106,13 @@ export {
   type RunComparison,
 } from './compare.js'
 
-export { redact, redactDeep, containsSecret } from './redact.js'
+export {
+  redact,
+  redactDeep,
+  containsSecret,
+  containsHomePath,
+  containsName,
+  type RedactOptions,
+} from './redact.js'
 
 export { matchGlob, globToRegExp, normalizePath, isWithin } from './glob.js'

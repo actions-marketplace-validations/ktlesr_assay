@@ -91,6 +91,12 @@ export function RateFigure({ value }: { value: Measurement }) {
 const clamp = (value: number) => Math.min(100, Math.max(0, value))
 
 /**
+ * İki uç etiketinin ("100%" + boşluk + "100%") kutuya sığdığı en küçük genişlik.
+ * `.interval-bounds` mono yazı tipinde, yani `ch` bir karakter.
+ */
+const BOUNDS_WIDTH = '9ch'
+
+/**
  * Güven aralığı — çizilmiş bir açıklık.
  *
  * İlerleme çubuğu değil: uçlarında serif olan bir aralık ve içinde ölçülen
@@ -154,12 +160,21 @@ export function IntervalRule({
          * konumlanıyordu ve aralık daraldığında üst üste biniyorlardı. Sonra
          * tek etikete birleştirildi ve bu sefer uçları etiketlemekten
          * vazgeçilmiş oldu. Flex ikisini birden veriyor: kutular ASLA üst üste
-         * binmez, iterler. Aralık genişken uçlara yaslanıyorlar; daraldığında
-         * yan yana gelip açıklığın iki yanına eşit taşıyorlar.
+         * binmez, iterler. Aralık genişken uçlara yaslanıyorlar.
+         *
+         * Daraldığında taşma iki yana eşit değil, SAĞA gidiyordu
+         * (`space-between` sığmayan içeriği sona iter). Sağ uca yakın dar bir
+         * aralıkta (%91–100) "100%" çizginin ve 375px'te sayfanın dışına
+         * çıkıyordu (0.4.1-j). Kutu artık en az iki etiket genişliğinde ve sağ
+         * kenarı çizginin sonunu geçmiyor: dar aralıkta etiketler sağa
+         * yaslanıyor, ölçü birimi kutunun kendi mono yazı tipinin `ch`'si.
          */
         <span
           className="interval-bounds"
-          style={{ left: `${low}%`, width: `${width}%` }}
+          style={{
+            left: `min(${low}%, calc(100% - ${BOUNDS_WIDTH}))`,
+            width: `max(${width}%, ${BOUNDS_WIDTH})`,
+          }}
           aria-hidden="true"
         >
           <span className="interval-bound">{pct(value.ci.low)}</span>
@@ -224,6 +239,7 @@ export function MeasurementBlock({
   verb = 'held',
   tone,
   delayMs = 0,
+  empty,
 }: {
   label: string
   value: Measurement
@@ -231,12 +247,20 @@ export function MeasurementBlock({
   verb?: string
   tone?: string
   delayMs?: number
+  /**
+   * Payda sıfırken ne söyleneceği (0.4.1-l). Verilmezse sebep "okunabilir
+   * sinyal yok" sayılır. Ama payda başka sebeple de sıfır olabilir: hedef skill
+   * hiç tetiklenmediyse kesinliğin paydası tanım gereği boş, sinyal okundu.
+   * Sebebi bilen çağıran; bileşen tahmin etmez.
+   */
+  empty?: { count: string; reason: string }
 }) {
   const gloss = intervalGloss(value)
+  const unmeasured = value.n === 0 && empty !== undefined ? empty : undefined
   return (
     <section className="measure-block">
       <p className="col-label">{label}</p>
-      <p className="measure-count">{countSentence(value, verb)}</p>
+      <p className="measure-count">{unmeasured?.count ?? countSentence(value, verb)}</p>
       <div className="measure-figure">
         <span className="measure-pct">{value.rate === null ? '—' : pct(value.rate)}</span>
         <div className="measure-instrument">
@@ -250,7 +274,8 @@ export function MeasurementBlock({
       </div>
       {gloss === null ? (
         <p className="measure-gloss text-unknown">
-          No attempt produced a readable signal, so there is no rate to show.
+          {unmeasured?.reason ??
+            'No attempt produced a readable signal, so there is no rate to show.'}
         </p>
       ) : (
         <p className="measure-gloss">
@@ -269,6 +294,29 @@ export function MeasurementBlock({
  * cümle**. Bir kullanıcının bu sayfadan tek bir şey anlaması gerekiyorsa o
  * şey burada yazıyor.
  */
+/**
+ * Ad, ayırıcılarından kırılabilir biçimde (0.4.1-k).
+ *
+ * Skill adları `plugin:skill` biçiminde ve içlerinde başka kırılma fırsatı yok;
+ * başlıktaki `overflow-wrap: anywhere` 375px'te `hallmark:hallmar` / `k` diye
+ * kelimenin ortasından bölüyordu. `:` ve `/`'den sonra bir `<wbr>` tarayıcıya
+ * doğru yeri gösteriyor; `anywhere` yalnızca tek başına sığmayan bir parça
+ * için son çare olarak kalıyor.
+ */
+export function BreakableName({ name }: { name: string }) {
+  const parts = name.split(/(?<=[:/])/)
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span key={index}>
+          {index > 0 ? <wbr /> : null}
+          {part}
+        </span>
+      ))}
+    </>
+  )
+}
+
 export function Determination({
   verdict,
   subject,
@@ -286,7 +334,9 @@ export function Determination({
       <mark.Glyph size={34} className="determination-mark" />
       <div className="determination-body">
         <p className="determination-word">{mark.label}</p>
-        <h1 className="determination-subject">{subject}</h1>
+        <h1 className="determination-subject">
+          <BreakableName name={subject} />
+        </h1>
         <p className="determination-sentence">{sentence}</p>
         {meta === undefined ? null : <div className="determination-meta">{meta}</div>}
       </div>

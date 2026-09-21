@@ -119,36 +119,43 @@ export function comparePins(a: Pins, b: Pins): PinComparison {
     'suiteHash',
   ]
 
-  // Pin 3'ün denetçisi: iki tarafta da dolu ve eşitse ortam kayması yakalanmış
-  // demektir ve sistem promptu hash'inin eksikliği karşılaştırmayı durdurmaz.
-  const environmentCovers =
-    !isUnavailable(a.environmentHash) &&
-    !isUnavailable(b.environmentHash) &&
-    a.environmentHash === b.environmentHash
-  const covered: Partial<Record<keyof Pins, boolean>> = {
-    systemPromptHash: environmentCovers,
-  }
+  /*
+   * Denetçinin bulgusu denetçinin adıyla raporlanır (0.3.0-a).
+   *
+   * `environmentHash` pin 3'ün denetçisi: host sistem promptu hash'ini
+   * vermediğinde koşulların kaymadığını gösterebilen tek şey o. Ama bulgusu
+   * eskiden pin 3'ün adına yazılıyordu ve rapor "systemPromptHash changed"
+   * diyordu — oysa o alan iki kayıtta da `not-provided-by-host` ile duruyor,
+   * yani kımıldamadı. Doğru karar (karşılaştırma durur), yanlış adres.
+   *
+   * Üç durum:
+   *  - iki tarafta da dolu ve EŞİT   → pin 3 kapsandı, karşılaştırma açılır
+   *  - iki tarafta da dolu ve FARKLI → `environmentHash` kaydı; pin 3 hakkında
+   *    bir şey bilmiyoruz ve iddia da etmiyoruz, o yüzden ayrıca anılmaz
+   *  - en az biri yok              → denetçi yok; pin 3 ölçülemedi
+   */
+  const bothEnvironments =
+    !isUnavailable(a.environmentHash) && !isUnavailable(b.environmentHash)
+  const environmentCovers = bothEnvironments && a.environmentHash === b.environmentHash
+  const environmentDrifted = bothEnvironments && a.environmentHash !== b.environmentHash
 
   const drifted: (keyof Pins)[] = []
   const unavailable: (keyof Pins)[] = []
 
   for (const key of keys) {
     if (isUnavailable(a[key]) || isUnavailable(b[key])) {
-      if (covered[key] !== true) unavailable.push(key)
+      // Denetçi kaydıysa aynı olayı ikinci kez, üstelik başka bir adla
+      // raporlamıyoruz: `environmentHash` zaten aşağıda kayan alan olarak
+      // listeleniyor.
+      const answered =
+        key === 'systemPromptHash' && (environmentCovers || environmentDrifted)
+      if (!answered) unavailable.push(key)
       continue
     }
     if (a[key] !== b[key]) drifted.push(key)
   }
 
-  // `environmentHash` kendisi bir pin değil, denetçi: kaydıysa pin 3 kaymıştır.
-  if (
-    !isUnavailable(a.environmentHash) &&
-    !isUnavailable(b.environmentHash) &&
-    a.environmentHash !== b.environmentHash &&
-    !drifted.includes('systemPromptHash')
-  ) {
-    drifted.push('systemPromptHash')
-  }
+  if (environmentDrifted) drifted.push('environmentHash')
 
   return {
     comparable: drifted.length === 0 && unavailable.length === 0,
@@ -162,9 +169,37 @@ export function comparePins(a: Pins, b: Pins): PinComparison {
 // ---------------------------------------------------------------------------
 
 export type TraceEventKind =
-  'tool_call' | 'tool_result' | 'assistant_message' | 'skill_trigger' | 'session_end'
+  | 'tool_call'
+  | 'tool_result'
+  | 'assistant_message'
+  | 'skill_trigger'
+  | 'session_end'
+  | 'hook'
 
 export type SessionOutcome = 'completed' | 'aborted' | 'error'
+
+/**
+ * Host'un koşum sırasında çalıştırdığı bir hook.
+ *
+ * Hook'lar ölçümün görünmez değişkenidir: bir `SessionStart` hook'u sistem
+ * promptuna metin enjekte edebilir, bir `PreToolUse` hook'u araç çağrısını
+ * reddedebilir. İkisi de skill'in davranışını değiştirir ve hiçbiri skill'in
+ * kendisi değildir. Kayıtta durmazlarsa iki koşum arasındaki fark
+ * açıklanamaz kalır.
+ */
+export interface HookRecord {
+  /** Host'un verdiği hook adı, ör. `SessionStart:startup`. */
+  name: string
+  /** Hangi olayda koştu, ör. `SessionStart`. */
+  event: string
+  /** Başlangıç mı yanıt mı. */
+  phase: 'started' | 'response'
+  exitCode?: number
+  /** Host'un bildirdiği sonuç, ör. `success`, `cancelled`. */
+  outcome?: string
+  stdout?: string
+  stderr?: string
+}
 
 /**
  * Host'tan okunan tek bir olay. Adaptörler ham transkripti buna normalize eder;
@@ -199,11 +234,35 @@ export interface TraceEvent {
   skill?: string
   /** `session_end` için oturumun nasıl bittiği. */
   outcome?: SessionOutcome
+  /**
+   * Çağrı yapılmadı çünkü izin katmanı reddetti — ve neden.
+   *
+   * "Skill bunu yapamadı" ile "Assay buna izin vermedi" iki farklı ölçümdür;
+   * ikisi de araç çağrısının düşmesiyle sonuçlanır ve izde aynı görünürlerse
+   * ayırt edilemezler. Bu alan reddi adıyla söyler.
+   */
+  refusal?: string
+  /** `hook` için host'un çalıştırdığı hook. */
+  hook?: HookRecord
 }
 
 // ---------------------------------------------------------------------------
 // Tetiklenme sinyali
 // ---------------------------------------------------------------------------
+
+/**
+ * Aktivasyonu istenmiş ama doğrulanamamış bir skill çağrısı.
+ *
+ * Model skill'i seçti — bu gözlendi. Ama gövdesi oturuma girmedi: izin
+ * katmanı reddetti, host hata döndürdü, ya da çağrının sonucu hiç gelmedi.
+ * Bu ne tetiklenmedir ne de tetiklenmemedir; ölçüm yapılmamıştır.
+ */
+export interface RefusedActivation {
+  /** Host'un bildirdiği skill adı. */
+  skill: string
+  /** Neden aktivasyon sayılmadı. Kullanıcıya gösterilir. */
+  reason: string
+}
 
 /**
  * Tetiklenme okunamadıysa bu tip "bilinmiyor"u görmezden gelinemez kılar:
@@ -212,10 +271,36 @@ export interface TraceEvent {
 export type TriggerObservation =
   | {
       available: true
-      /** Hedef skill tetiklendi mi. */
+      /**
+       * Hedef skill **aktive oldu** mu.
+       *
+       * Çağrının gözlenmesi yetmez: gövdesi oturuma enjekte edilmediyse
+       * skill koşmamıştır. Reddedilmiş bir çağrıyı tetiklenme saymak, ürünün
+       * ölçtüğünü iddia ettiği tek şeyi sahte kılar.
+       */
       triggered: boolean
-      /** Bu koşumda tetiklendiği gözlenen skill'ler. */
+      /**
+       * Bu koşumda aktive olduğu gözlenen skill'ler, **ilk aktivasyon
+       * sırasında** ve tekrarsız: ilk eleman ilk tetiklenen skill.
+       *
+       * Sıra bir sözleşme (0.4.0): çakışma değerlendirmesi kazananı `skills[0]`
+       * olarak okuyor ve matrisin sütunları da ondan geliyor. Adaptör bu sırayı
+       * korumak zorunda; Claude Code adaptörü akıştaki çağrı sırasını koruyor
+       * (adapter.test.ts, stream.test.ts).
+       */
       skills: readonly string[]
+      /**
+       * Hedef skill seçildi ama aktivasyonu doğrulanamadı ve hiç aktive
+       * olmadı. `true` iken tetiklenme iddiası `unknown` üretir — ne pass ne
+       * fail (değişmez #1).
+       *
+       * Yoksa kayıt 0.2.0'dan önce yazılmış: o sürüm aktivasyonu doğrulamıyor,
+       * seçilen her skill'i tetiklenmiş sayıyordu (0.2.0-d). Eksik alan "red
+       * yok" diye okunamaz — kontrol hiç yapılmadı (`activationUnverified`).
+       */
+      refused?: boolean
+      /** Aktivasyonu doğrulanamayan her çağrı, sebebiyle. `refused` ile birlikte yok olur. */
+      refusals?: readonly RefusedActivation[]
       /**
        * `skills` tetiklenen skill'lerin *tamamı* mı, yoksa yalnızca hedef mi?
        * `false` ise "şu skill tetiklenmedi" iddiası doğrulanamaz ve `unknown`
@@ -317,6 +402,19 @@ export interface Attempt {
   /** Vaka setinde beyan edilen assertion'ların sonucu. */
   assertions: readonly AssertionResult[]
   /**
+   * Beyan edilmiş ama **bu modda değerlendirilmemiş** assertion'lar.
+   *
+   * Hızlı mod yalnızca tetiklenme katmanını ölçüyor. Bu assertion'lar
+   * `assertions` listesine `unknown` olarak girmiyor: `unknown` "ölçmeye
+   * çalıştık, sinyal alamadık" demek ve koşumu ölçülemez ilan ediyor. Burada
+   * olan şey başka — hiç bakılmadı, çünkü kullanıcı bakılmamasını istedi.
+   * İkisini aynı kovaya koymak, kasıtlı bir kapsam kararını bir ölçüm
+   * başarısızlığı gibi gösterirdi.
+   *
+   * Sonucu olmayan bir iddia bir sonuç listesinde duramaz; o yüzden ayrı alan.
+   */
+  notEvaluated?: readonly Assertion[]
+  /**
    * Attempt'in bileşik sonucu: `triggerCheck` ve `assertions` birlikte.
    *
    * `reason` başarıda kaç KONTROL geçtiğini sayar ve o sayı
@@ -342,6 +440,13 @@ export interface CaseResult {
    * görecek. İddia yoksa alan da yok.
    */
   expectedTrigger?: boolean
+  /**
+   * Çakışma vakasının beklenen kazananı (0.4.0): ilk tetiklenmesi kabul edilen
+   * skill'ler; birden fazlaysa biri yeter. `[]` = hiçbir skill tetiklenmemeli
+   * (`winner: none`). İddia yoksa alan da yok. `expectedTrigger` ile aynı
+   * gerekçe: matris suite dosyası olmadan kayıttan kurulabilmeli.
+   */
+  expectedWinner?: readonly string[]
   attempts: readonly Attempt[]
   /** Değişmez #4: oran asla çıplak gösterilmez, bkz. Proportion. */
   passRate: Proportion
@@ -366,11 +471,345 @@ export interface Run {
    */
   skill: string
   pins: Pins
+  /**
+   * Koşumun izin modu — host'un bildirdiği hâliyle.
+   *
+   * `Pins` değil, ama pinlerin denetçisi olan `environmentHash`'in içinde:
+   * mod değişirse hash değişir ve karşılaştırma durur. Burada ayrıca duruyor
+   * çünkü bir hash raporda okunmaz, mod okunur.
+   *
+   * Attempt'ler farklı mod bildirdiyse (mod koşum ortasında kaydıysa) alan
+   * yazılmaz.
+   */
+  permissionMode?: string
+  /**
+   * `Pins.environmentHash`'in girdisi — host'un bildirdiği ortamın kendisi.
+   *
+   * Hash "bir şey değişti" diyebiliyor, "ne değişti" diyemiyor. Bileşenler
+   * kayıtta durduğunda `compareRuns` kayan alanı adıyla söyleyebiliyor
+   * (`permissionMode: acceptEdits → bypassPermissions`). Adaptör bunları hash
+   * için zaten üretiyordu ve atıyordu.
+   *
+   * Opsiyonel: eski kayıtlarda yok ve host bildirmiyorsa yazılmaz. Yokken
+   * karşılaştırma hash düzeyinde konuşur.
+   */
+  environment?: Environment
   /** Suite'te beyan edilen tekrar sayısı. */
   runs: number
+  /**
+   * Aynı anda koşan deneme sayısı. Varsayılan 1.
+   *
+   * `environmentHash`e **girmiyor**: host'un bildirdiği ortamın değil koşum
+   * düzeninin özelliği ve tetiklenme oranını değiştirmesi beklenmiyor. Ama
+   * kayda giriyor, çünkü **gecikme ve maliyet sayıları** eş zamanlı koşumda
+   * aynı şeyi ölçmüyor: denemeler CPU'yu, belleği ve host hız sınırını
+   * paylaşıyor. Alanı okumadan iki koşumun süresini karşılaştırmak yanlış
+   * olur.
+   */
+  concurrency?: number
+  /**
+   * Bu koşumda **ölçülen katmanlar**. Alan yoksa hepsi ölçüldü.
+   *
+   * Hızlı mod yalnızca tetiklenme katmanını koşuyor. O koşumun kaydı, dar bir
+   * ölçüm olduğunu kendi içinde söylemek zorunda: yoksa okuyucu artefakt
+   * iddialarının sınandığını sanır. Bu bir yarım ölçüm değil, **beyan edilmiş
+   * dar bir ölçüm** — ölçmediğini ölçtüm demiyor, ölçmediğini söylüyor.
+   */
+  layers?: readonly RunLayer[]
+  /**
+   * Hiç koşulmamış vakalar ve sebepleri.
+   *
+   * `cases` içinde sıfır denemeli bir vaka **görünmüyor**: "koşulmadı" ile
+   * "koşuldu ama karar çıkmadı" iki ayrı şey ve N=0'lık bir satır ikincisi
+   * gibi okunurdu. Koşulmayan vaka buraya, sebebiyle yazılıyor.
+   */
+  skipped?: readonly SkippedCase[]
   cases: readonly CaseResult[]
   verdict: Verdict
+  /**
+   * Koşum yarım kaldı ve journal'dan toparlandı.
+   *
+   * Alan varsa kayıt, ölçümün tamamı değil o ana kadar tamamlanmış
+   * denemelerdir. Bu bir yalan değil, daha az bilgi: değişmez #4 zaten her
+   * oranı N ve aralığıyla gösteriyor, N küçük olduğu için aralık geniş
+   * çıkıyor. Ama kaydın kendisi de yarım olduğunu söylemek zorunda — okuyucu
+   * `runs: 10` görüp vaka başına 10 deneme sanmamalı.
+   */
+  partial?: PartialRun
+  /**
+   * Kaydı üreten Assay sürümü (runner paketinin sürümü; dört paket tek sürümle
+   * yayımlanıyor). 0.3.2'de geldi.
+   *
+   * Verdict'in anlamı sürümler arasında değişti: 0.2.0 reddedilen aktivasyonu
+   * tetiklenme sayıyordu, 0.3.0 yarım kaydı `pass` sayabiliyordu. Sürümü
+   * taşımayan bir kayıt, hangi kurallarla yargılandığını söyleyemez.
+   *
+   * Yoksa kayıt 0.3.1 ya da öncesinden: okurken `assayVersionLabel` kullan,
+   * alanı doğrudan basma — boş kalmasın, bildiğini söylesin.
+   */
+  assayVersion?: string
 }
+
+/**
+ * Sürüm alanı olmayan kayıtlar için okuma etiketi.
+ *
+ * "0.3.1 öncesi" değil "0.3.1 ya da öncesi": alan 0.3.2'de geldi, yani 0.3.1'in
+ * kendi kayıtları da alansız.
+ */
+export const PRE_VERSION_STAMP = '0.3.1 or earlier'
+
+/**
+ * Kaydı üreten Assay sürümü, okunabilir biçimde.
+ *
+ * Alan yoksa boş dönmez: kaydın damgalamadan önce yazıldığını söyler. Terminal,
+ * HTML ve hosted taraf aynı cümleyi buradan alıyor.
+ */
+export function assayVersionLabel(run: Pick<Run, 'assayVersion'>): string {
+  return run.assayVersion === undefined || run.assayVersion.trim() === ''
+    ? `${PRE_VERSION_STAMP} (the record predates version stamping)`
+    : run.assayVersion
+}
+
+/**
+ * Kaydın tetiklenme gözlemleri aktivasyonu doğrulamadan mı yazıldı (0.4.1-a).
+ *
+ * 0.2.0 öncesi kayıtlarda `refused` yok: o sürüm seçilen her skill'i
+ * tetiklenmiş sayıyordu. Terminal ve hosted taraf aynı cümleyi kullanıyor.
+ */
+export function activationUnverified(run: Pick<Run, 'cases'>): boolean {
+  return run.cases.some((result) =>
+    result.attempts.some((a) => a.trigger.available && a.trigger.refused === undefined),
+  )
+}
+
+export const ACTIVATION_UNVERIFIED =
+  'not made: the record predates 0.2.0, which began confirming that a selected skill actually loaded'
+
+/**
+ * Bir koşumun ölçebileceği katmanlar.
+ *
+ * `trigger` — skill doğru istekte devreye girdi mi.
+ * `assertions` — vaka setinde beyan edilen artefakt, iz ve yan etki iddiaları.
+ */
+export type RunLayer = 'trigger' | 'assertions'
+
+/** Koşulmamış bir vaka ve sebebi. */
+export interface SkippedCase {
+  caseId: string
+  /** Neden koşulmadı — okuyucu eksiği görüp sebebini de görsün. */
+  reason: string
+  /**
+   * Eleme türü. Koşum verdict'i buna bakıyor, `reason` metnine değil.
+   *
+   * `layer` — kullanıcı dar bir ölçüm beyan etti (`--fast`) ve vakada o
+   *   katmanda ölçülecek bir şey yok. Kapsam kararı; verdict'i etkilemez.
+   * `budget` — deneme tavanı doldu. Hangi vakanın kesileceğini kullanıcı değil
+   *   suite sırası seçti; kesilen vaka negatifse ayrım gücü hiç ölçülmemiş
+   *   olabilir. Koşum bu yüzden `pass` veremez (değişmez #1 ve #5).
+   * `interrupted` — koşum bu vakaya hiç ulaşmadan öldü; kurtarma journal
+   *   başlığındaki plandan buluyor. `budget` ile aynı sebepten `pass` engeli.
+   *   Bu etiket olmadan ulaşılamayan vaka kayıttan iz bırakmadan düşüyordu.
+   */
+  cause: 'layer' | 'budget' | 'interrupted'
+}
+
+/** Yarım kalmış bir koşumun künyesi. */
+export interface PartialRun {
+  /** Neden yarım kaldı: süreç öldürüldü, çöktü, kesildi. */
+  reason: string
+  /** Journal'dan toparlandığı an. */
+  recoveredAt: string
+  /**
+   * Okunamadığı için atılan satır sayısı.
+   *
+   * Süreç bir satırın ortasında öldüğünde journal'ın sonunda yarım bir JSON
+   * kalıyor. O satır atılıyor ama **sayılıyor**: sessizce yutmak, kaç
+   * denemenin kaybolduğunu gizlemek olurdu.
+   */
+  droppedLines?: number
+}
+
+/**
+ * Host'un koşum başında bildirdiği ortam.
+ *
+ * `environmentHash` bu nesnenin kanonik serileştirmesinden hesaplanır; ikisi
+ * ayrışmasın diye hash'i üreten taraf nesneyi de veriyor.
+ */
+export interface Environment {
+  model: string
+  version: string
+  outputStyle?: string
+  permissionMode?: string
+  tools: readonly string[]
+  skills: readonly string[]
+  agents: readonly string[]
+  plugins: readonly string[]
+  /**
+   * Host'un bağlama yüklediği talimat dosyaları (CLAUDE.md ve benzerleri) —
+   * **ölçülmüş** hâliyle (0.4.5).
+   *
+   * Her giriş `<tür> <yol> sha256:<ilk 16>`: çalışma dizini içindeki dosya
+   * `./` ile başlayan göreli yolla (suite'in fixture'ı), dışındaki mutlak
+   * yolla (sızıntı). İçerik hash'i girişte, çünkü aynı yoldaki dosya
+   * değişirse sistem istemi de değişir.
+   *
+   * Üç durum ayrı:
+   *  - alan yok → ölçülmedi (0.4.5 öncesi kayıt ya da host'un ölçüm kancası
+   *    o oturumda koşmadı). "Temiz" demek değil.
+   *  - `[]` → ölçüldü, hiçbir talimat dosyası yüklenmedi.
+   *  - dolu → ölçüldü, bunlar yüklendi.
+   *
+   * Ölçülmemiş izolasyon izolasyon değil: 0.4.5'e kadar adaptör kullanıcının
+   * `CLAUDE.md`'sinin yüklenmediğini varsayıyordu ve Windows'ta yükleniyordu.
+   * Alan hash'e yalnızca ölçüldüğünde giriyor; ölçülmemiş bir kayıtla ölçülmüş
+   * bir kayıt bu yüzden "ortam kaydı" olarak ayrışır ve karşılaştırılmaz.
+   */
+  memory?: readonly string[]
+  /**
+   * Deneme bir konteynerde koştuysa, konteynerin koşulları (K2).
+   *
+   * Alan yoksa deneme ana makinede, runner'ın bir alt sürecinde koştu. Varsa
+   * hash'e giriyor: imaj, platform, ajanın çıkabildiği adresler ve sınırlar
+   * ölçümün koşulu. Girmeseydi konteyner kayıtları dizüstü kayıtlarıyla sessizce
+   * karşılaştırılırdı. Alan yalnızca konteyner koşumlarında yazıldığı için
+   * dizüstü kayıtlarının hash'i değişmiyor.
+   */
+  container?: ContainerEnvironment
+}
+
+/** Denemenin koştuğu konteyner — runner'ın başlattığı hâliyle. */
+export interface ContainerEnvironment {
+  /**
+   * İmajın özeti (`sha256:…`). Node, Claude Code, Chromium ve çıkış
+   * proxy'sinin kodu bunun içinde; Assay'in kendi kodu ana makineden geliyor
+   * ve kayıttaki `assayVersion` onu söylüyor.
+   */
+  image: string
+  /** İmajın işletim sistemi ve mimarisi, ör. `linux/amd64`. */
+  platform: string
+  /** Ajanın çıkabildiği adresler (çıkış proxy'sinin kendi bildirdiği liste), sıralı. */
+  egress: readonly string[]
+  /** Konteyner sınırları, ör. `memory 2g, cpus 2, pids 512`. */
+  limits: string
+}
+
+/** Ortamın iki koşum arasında kayan tek bir alanı. */
+export interface EnvironmentChange {
+  field: keyof Environment
+  before: string
+  after: string
+}
+
+/**
+ * İki ortam kaydını alan alan karşılaştırır.
+ *
+ * Liste alanlarında (araçlar, skill'ler) fark eklenen/çıkarılan olarak
+ * yazılır: tam listeyi basmak raporu okunmaz yapıyor ve asıl soru "ne
+ * değişti".
+ */
+export function diffEnvironments(
+  a: Environment,
+  b: Environment,
+): readonly EnvironmentChange[] {
+  const changes: EnvironmentChange[] = []
+  const scalars = ['model', 'version', 'outputStyle', 'permissionMode'] as const
+  for (const field of scalars) {
+    const before = a[field] ?? '(not reported)'
+    const after = b[field] ?? '(not reported)'
+    if (before !== after) changes.push({ field, before, after })
+  }
+  const lists = ['tools', 'skills', 'agents', 'plugins'] as const
+  for (const field of lists) {
+    const before = [...a[field]].sort()
+    const after = [...b[field]].sort()
+    if (before.join('\u0000') === after.join('\u0000')) continue
+    const added = after.filter((x) => !before.includes(x))
+    const removed = before.filter((x) => !after.includes(x))
+    changes.push({
+      field,
+      before: removed.length > 0 ? `-${removed.join(', -')}` : count(before.length),
+      after: added.length > 0 ? `+${added.join(', +')}` : count(after.length),
+    })
+  }
+  // Talimat dosyaları: "ölçülmedi" bir liste değil, ayrı bir durum (0.4.5).
+  if (a.memory === undefined || b.memory === undefined) {
+    if (a.memory !== b.memory) {
+      changes.push({ field: 'memory', before: memoryText(a.memory), after: memoryText(b.memory) })
+    }
+  } else {
+    const before = [...a.memory].sort()
+    const after = [...b.memory].sort()
+    if (before.join('\u0000') !== after.join('\u0000')) {
+      const added = after.filter((x) => !before.includes(x))
+      const removed = before.filter((x) => !after.includes(x))
+      changes.push({
+        field: 'memory',
+        before: removed.length > 0 ? `-${removed.join(', -')}` : memoryText(before),
+        after: added.length > 0 ? `+${added.join(', +')}` : memoryText(after),
+      })
+    }
+  }
+  // Konteyner: yokluğu "ana makine" demek, alt alanlar tek tek (K2).
+  if (a.container === undefined || b.container === undefined) {
+    if (a.container !== b.container) {
+      changes.push({
+        field: 'container',
+        before: a.container === undefined ? HOST_PROCESS : containerText(a.container),
+        after: b.container === undefined ? HOST_PROCESS : containerText(b.container),
+      })
+    }
+  } else {
+    for (const key of ['image', 'platform', 'egress', 'limits'] as const) {
+      const before = String(a.container[key])
+      const after = String(b.container[key])
+      if (before !== after) {
+        changes.push({ field: 'container', before: `${key} ${before}`, after: `${key} ${after}` })
+      }
+    }
+  }
+  return changes
+}
+
+const HOST_PROCESS = 'none (a process on the host)'
+
+const containerText = (c: ContainerEnvironment) =>
+  `${c.image} ${c.platform}; egress ${c.egress.length === 0 ? 'none' : c.egress.join(', ')}; ${c.limits}`
+
+/** Denemenin nerede koştuğu, raporda okunacak hâliyle (K2). */
+export function containerLabel(run: Pick<Run, 'environment'>): string {
+  const container = run.environment?.container
+  return container === undefined ? HOST_PROCESS : containerText(container)
+}
+
+const memoryText =(memory: readonly string[] | undefined) =>
+  memory === undefined ? 'not measured' : memory.length === 0 ? 'none loaded' : count(memory.length)
+
+/**
+ * Koşumda host'un yüklediği talimat dosyaları, raporda okunacak hâliyle.
+ *
+ * Terminal, HTML ve hosted sayfa aynı cümleyi kullanıyor. Ölçülmemiş bir
+ * kayıt "none" demez — ölçülmediğini söyler.
+ */
+export function hostMemoryLabel(run: Pick<Run, 'environment'>): string {
+  const memory = run.environment?.memory
+  if (memory === undefined) return 'not measured (the record predates 0.4.5 or the probe did not run)'
+  if (memory.length === 0) return 'none loaded (measured)'
+  return memory.join('; ')
+}
+
+/**
+ * Çalışma dizini dışından yüklenmiş talimat dosyası var mı.
+ *
+ * İçerideki dosya suite'in fixture'ı; dışarıdaki, ölçülen bağlama sızan
+ * host dosyası (0.4.5).
+ */
+export function memoryFromOutside(run: Pick<Run, 'environment'>): readonly string[] {
+  return (run.environment?.memory ?? []).filter((entry) => !/^\S+ \.\//.test(entry))
+}
+
+/** `1 entry` / `2 entries` — rapor metni dilbilgisine takılmasın. */
+const count = (n: number) => `${n} ${n === 1 ? 'entry' : 'entries'}`
+
 
 // ---------------------------------------------------------------------------
 // Oran — değişmez #4

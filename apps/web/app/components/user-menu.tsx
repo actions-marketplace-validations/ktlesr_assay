@@ -12,10 +12,7 @@ export async function UserMenu() {
   const session = await auth()
   if (session === null) {
     return (
-      <Link
-        href="/signin"
-        className="text-xs uppercase tracking-[0.09em] text-text-muted no-underline hover:text-text"
-      >
+      <Link href="/signin" className="head-link">
         Sign in
       </Link>
     )

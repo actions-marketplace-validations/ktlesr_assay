@@ -14,9 +14,9 @@
  */
 
 import { createHash } from 'node:crypto'
-import { cp, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
 import type { CapturedFile, EnvDiff, NetworkRequest, TraceEvent } from '@ktlsr/assay-core'
 
 /** Yol → içerik hash'i. Anlık görüntü. */
@@ -29,13 +29,76 @@ export interface Workspace {
   before: Snapshot
 }
 
+/**
+ * Çalışma dizinlerinin açılabileceği kökler, tercih sırasıyla (0.4.5).
+ *
+ * Çalışma dizini ev dizininin altında olmamalı: host oradan köke kadar
+ * yürüyüp kullanıcının talimat dosyalarını (`~/.claude/CLAUDE.md`) bir üst
+ * projeninki gibi yüklüyor. Windows'ta `%TEMP%` ev dizininin altında, yani
+ * bugüne kadar her deneme kullanıcının kişisel talimatlarıyla koştu.
+ *
+ * - `ASSAY_WORK_ROOT` verildiyse o; kullanıcı bilerek seçti.
+ * - geçici dizin ev dışındaysa o (Linux `/tmp`, macOS `/var/folders`).
+ * - değilse Windows'ta sürücü kökünde `assay-work`, POSIX'te `/tmp`; son çare
+ *   yine geçici dizin.
+ *
+ * Tavan: ev dışı bir kökün üstünde de talimat dosyası olabilir (`D:\CLAUDE.md`).
+ * O yüzden bu tek başına yetmiyor: adaptör üst dizinleri ayrıca dışlıyor ve
+ * yüklenen her dosyayı ölçüp kayda yazıyor.
+ */
+export function workRoots(
+  tmp: string = tmpdir(),
+  home: string = homedir(),
+  override: string | undefined = process.env['ASSAY_WORK_ROOT'],
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  // Yollar platformun kendi kurallarıyla: Linux'ta `C:\Users\…` göreli bir yol
+  // sayılır ve ev dizini kontrolü sessizce "dışında" derdi (CI yakaladı).
+  const path = platform === 'win32' ? win32 : posix
+  const inside = (child: string, root: string) => {
+    const rel = path.relative(path.resolve(root), path.resolve(child))
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  if (override !== undefined && override.trim() !== '') return [path.resolve(override)]
+  if (!inside(tmp, home)) return [tmp]
+  const outside = platform === 'win32' ? path.join(path.parse(path.resolve(tmp)).root, 'assay-work') : '/tmp'
+  return inside(outside, home) ? [tmp] : [outside, tmp]
+}
+
+/** İlk oluşturulabilen kök. */
+async function workRoot(): Promise<string> {
+  const candidates = workRoots()
+  for (const candidate of candidates) {
+    const ok = await mkdir(candidate, { recursive: true }).then(
+      () => true,
+      () => false,
+    )
+    if (ok) return candidate
+  }
+  return tmpdir()
+}
+
+/**
+ * Vakanın fixture yolu, suite dosyasının dizinine göre.
+ *
+ * Eskiden dizin "son `/`'den öncesi" diye alınıyordu; suite yalın dosya adıyla
+ * verilince (`assay run x.suite.yaml`) ayraç yoktu ve dosya adının kendisi dizin
+ * sayılıyordu — fixture `x.suite.yaml/../fixtures/…` olup bulunamıyor, deneme
+ * `unknown` oluyordu (K0'da bulundu).
+ */
+export function resolveFixtures(fixtures: string | undefined, suitePath?: string): string | undefined {
+  if (fixtures === undefined) return undefined
+  if (suitePath === undefined || isAbsolute(fixtures)) return fixtures
+  return join(dirname(suitePath), fixtures)
+}
+
 /** Bir attempt için temiz çalışma dizini kurar ve fixture'ları kopyalar. */
 export async function createWorkspace(options: {
   /** Kopyalanacak fixture dizini veya dosyası. */
   fixtures?: string | undefined
   prefix?: string
 }): Promise<Workspace> {
-  const dir = await mkdtemp(join(tmpdir(), options.prefix ?? 'assay-work-'))
+  const dir = await mkdtemp(join(await workRoot(), options.prefix ?? 'assay-work-'))
   if (options.fixtures !== undefined && options.fixtures !== '') {
     const source = resolve(options.fixtures)
     const info = await stat(source).catch(() => null)

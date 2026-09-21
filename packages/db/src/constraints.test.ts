@@ -157,16 +157,25 @@ async function insertAttempt(
     triggerAvailable: true,
     triggerTriggered: true,
     triggerComplete: true,
-    triggerVia: 'Skill tool call',
+    triggerVia: 'confirmed Skill activation',
     triggerReason: null,
+    triggerRefusals: '[]',
     costUsd: 0.01,
     ...overrides,
+    // Sinyal okunduysa red durumu da bilinir; okunmadıysa bilinmez. Test
+    // açıkça bir değer vermediyse şekle uyan değer türetiliyor.
+    triggerRefused:
+      'triggerRefused' in overrides
+        ? overrides['triggerRefused']
+        : overrides['triggerAvailable'] === false
+          ? null
+          : false,
   }
   await run(
     `INSERT INTO "Attempt" ("id","caseResultId","index","startedAt","finishedAt",
        "verdict","reason","triggerAvailable","triggerTriggered","triggerComplete",
-       "triggerVia","triggerReason","costUsd")
-     VALUES ($1,$2,$3,now(),now(),$4::"Verdict",$5,$6,$7,$8,$9,$10,$11)`,
+       "triggerVia","triggerReason","triggerRefused","triggerRefusals","costUsd")
+     VALUES ($1,$2,$3,now(),now(),$4::"Verdict",$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)`,
     [
       id,
       caseResultId,
@@ -178,6 +187,8 @@ async function insertAttempt(
       values.triggerComplete,
       values.triggerVia,
       values.triggerReason,
+      values.triggerRefused,
+      values.triggerRefusals,
       values.costUsd,
     ],
   )
@@ -222,6 +233,91 @@ describe('değişmez #1 — unknown gerekçesiz olamaz', () => {
       'run_unknown_needs_reason',
       ...(await runSql(suiteId, 'UNKNOWN', '   ')),
     )
+  })
+
+  /*
+   * 0.3.0-b — yarım bir kayıt sebepsiz olamaz.
+   *
+   * Bir durumu bildirip gerekçesini bildirmemek, okuyucuyu bilgisiz bırakırken
+   * bilgilendirilmiş sanmaktır: raporda "incomplete run" yazar, neden yarım
+   * kaldığı yazmaz.
+   */
+  const partialSql = (suiteId: string, partial: string | null): [string, unknown[]] => [
+    `INSERT INTO "Run" ("id","suiteId","startedAt","finishedAt","host","skill",
+       "pinSkillSource","pinSkillHash","pinModel","pinSystemPromptHash",
+       "pinSuiteVersion","pinSuiteHash","runsPerCase","verdict","partial")
+     VALUES ($1,$2,now(),now(),'h','docx','a','b','c','d',1,'e',10,'PASS'::"Verdict",$3::jsonb)`,
+    [next(), suiteId, partial],
+  ]
+
+  it('Run: yarım kayıt ama sebep yok → reddedilir', async () => {
+    const suiteId = await makeSuite()
+    await violates(
+      'run_partial_shape',
+      ...partialSql(suiteId, JSON.stringify({ recoveredAt: '2026-09-08T11:00:00.000Z' })),
+    )
+  })
+
+  it('Run: yarım kayıt ama sebep boş string → reddedilir', async () => {
+    const suiteId = await makeSuite()
+    await violates(
+      'run_partial_shape',
+      ...partialSql(
+        suiteId,
+        JSON.stringify({ reason: '', recoveredAt: '2026-09-08T11:00:00.000Z' }),
+      ),
+    )
+  })
+
+  it('Run: sebebi ve kurtarma anı olan yarım kayıt kabul edilir', async () => {
+    const suiteId = await makeSuite()
+    const [sql, params] = partialSql(
+      suiteId,
+      JSON.stringify({ reason: 'interrupted', recoveredAt: '2026-09-08T11:00:00.000Z' }),
+    )
+    await expect(run(sql, params)).resolves.toBeDefined()
+  })
+
+it('Run: atlanan vaka sebepsiz olamaz', async () => {
+    const suiteId = await makeSuite()
+    await violates(
+      'run_skipped_shape',
+      `INSERT INTO "Run" ("id","suiteId","startedAt","finishedAt","host","skill",
+         "pinSkillSource","pinSkillHash","pinModel","pinSystemPromptHash",
+         "pinSuiteVersion","pinSuiteHash","runsPerCase","verdict","skipped")
+       VALUES ($1,$2,now(),now(),'h','docx','a','b','c','d',1,'e',10,'PASS'::"Verdict",$3::jsonb)`,
+      [next(), suiteId, JSON.stringify([{ caseId: 'c1' }])],
+    )
+  })
+
+  it('Run: sebebi olan atlanan vaka kabul edilir', async () => {
+    const suiteId = await makeSuite()
+    await expect(
+      run(
+        `INSERT INTO "Run" ("id","suiteId","startedAt","finishedAt","host","skill",
+           "pinSkillSource","pinSkillHash","pinModel","pinSystemPromptHash",
+           "pinSuiteVersion","pinSuiteHash","runsPerCase","verdict","skipped")
+         VALUES ($1,$2,now(),now(),'h','docx','a','b','c','d',1,'e',10,'PASS'::"Verdict",$3::jsonb)`,
+        [next(), suiteId, JSON.stringify([{ caseId: 'c1', reason: 'trigger layer only', cause: 'layer' }])],
+      ),
+    ).resolves.toBeDefined()
+  })
+
+  it('Run: bos Assay surumu reddedilir, NULL ve dolu kabul edilir (0.3.2)', async () => {
+    const suiteId = await makeSuite()
+    const sql = `INSERT INTO "Run" ("id","suiteId","startedAt","finishedAt","host","skill",
+         "pinSkillSource","pinSkillHash","pinModel","pinSystemPromptHash",
+         "pinSuiteVersion","pinSuiteHash","runsPerCase","verdict","assayVersion")
+       VALUES ($1,$2,now(),now(),'h','docx','a','b','c','d',1,'e',10,'PASS'::"Verdict",$3)`
+    await violates('run_assay_version_not_blank', sql, [next(), suiteId, '  '])
+    await expect(run(sql, [next(), suiteId, null])).resolves.toBeDefined()
+    await expect(run(sql, [next(), suiteId, '0.3.2'])).resolves.toBeDefined()
+  })
+
+  it('Run: normal biten koşumda partial NULL kalabilir', async () => {
+    const suiteId = await makeSuite()
+    const [sql, params] = partialSql(suiteId, null)
+    await expect(run(sql, params)).resolves.toBeDefined()
   })
 
   it('Run: UNKNOWN ve gerekçe var → kabul edilir', async () => {
@@ -416,7 +512,47 @@ describe('vaka kısıtları', () => {
     ).resolves.toBeDefined()
   })
 
-  it.each(['flat', 'Trigger.Positive', 'trigger..x', 'trigger.pos itive'])(
+  /*
+   * 0.4.0 — id kısıtı core ile aynı desen. Yalnız core genişletilseydi tireli
+   * bir id doğrulayıcıdan geçip `assay push`'ta burada reddedilirdi.
+   */
+  it.each(['collide.copy-editing.tighten_paragraph', 'marketing-skills.cold-email.x', 'trigger.negative._legacy'])(
+    'tireli ve eski bicimli id kabul edilir: %s',
+    async (caseId) => {
+      const suiteId = await makeSuite()
+      await expect(makeCase(suiteId, { caseId })).resolves.toBeDefined()
+    },
+  )
+
+  it('yalniz kazanan tasiyan vaka (winner: none) bir sey olcuyor sayilir (0.4.0)', async () => {
+    const suiteId = await makeSuite()
+    await expect(
+      run(
+        `INSERT INTO "Case" ("id","suiteId","caseId","prompt","expectTriggered","expectsWinner","expectedWinner")
+         VALUES ($1,$2,'negative.pricing','p',NULL,true,'{}')`,
+        [next(), suiteId],
+      ),
+    ).resolves.toBeDefined()
+  })
+
+  it('kazanan iddiasi yokken dolu kazanan listesi reddedilir: Case ve CaseResult', async () => {
+    const suiteId = await makeSuite()
+    await violates(
+      'case_winner_consistent',
+      `INSERT INTO "Case" ("id","suiteId","caseId","prompt","expectTriggered","expectsWinner","expectedWinner")
+       VALUES ($1,$2,'collide.x.y','p',true,false,'{cro}')`,
+      [next(), suiteId],
+    )
+    const caseId = await makeCase(suiteId)
+    const runId = await makeRun(suiteId)
+    await expect(
+      makeCaseResult(runId, caseId).then((id) =>
+        run(`UPDATE "CaseResult" SET "expectsWinner" = false, "expectedWinner" = '{cro}' WHERE "id" = $1`, [id]),
+      ),
+    ).rejects.toThrow('case_result_winner_consistent')
+  })
+
+  it.each(['flat', 'Trigger.Positive', 'trigger..x', 'trigger.pos itive', 'trigger.-positive'])(
     'hiyerarşik olmayan id reddedilir: %s',
     async (caseId) => {
       const suiteId = await makeSuite()
@@ -489,3 +625,113 @@ async function runSql(
     [next(), suiteId, verdict, unknownReason],
   ]
 }
+
+/**
+ * 0.2.0 — reddedilmiş bir aktivasyon tetiklenme olarak saklanamaz.
+ *
+ * Impeccable pilotunda tam olarak bu kayıt yazıldı: dört reddedilmiş
+ * aktivasyon `triggered: true` diye saklandı ve rapor precision %100 dedi.
+ * Uygulama katmanı bunu bir daha yazmasın diye kısıt.
+ */
+describe('değişmez #1 — reddedilen aktivasyon tetiklenme sayılamaz', () => {
+  let caseResultId: string
+
+  beforeAll(async () => {
+    const suiteId = await makeSuite()
+    const caseId = await makeCase(suiteId)
+    const runId = await makeRun(suiteId)
+    caseResultId = await makeCaseResult(runId, caseId)
+  })
+
+  it('hem reddedildi hem tetiklendi diyen kayıt reddedilir', async () => {
+    await expect(
+      insertAttempt(caseResultId, { triggerRefused: true, triggerTriggered: true }),
+    ).rejects.toThrow('attempt_refusal_shape')
+  })
+
+  // 0.4.1-a: 0.2.0 öncesi kayıtta aktivasyon kontrolü yok. NULL "kimse
+  // bakmadı" demek; `false` ("red yok") ile karıştırılmıyor.
+  it('sinyal okundu, red kontrolü yapılmamış (0.2.0 öncesi) → kabul edilir', async () => {
+    await expect(
+      insertAttempt(caseResultId, { triggerAvailable: true, triggerRefused: null }),
+    ).resolves.toBeTypeOf('string')
+  })
+
+  it('red listesi dolu ama red durumu bilinmiyor → reddedilir', async () => {
+    await expect(
+      insertAttempt(caseResultId, {
+        triggerAvailable: true,
+        triggerRefused: null,
+        triggerRefusals: '[{"skill":"docx","reason":"the host denied permission"}]',
+      }),
+    ).rejects.toThrow('attempt_refusal_shape')
+  })
+
+  it('sinyal okunamadı ama red durumu yazılmış → reddedilir', async () => {
+    await expect(
+      insertAttempt(caseResultId, {
+        triggerAvailable: false,
+        triggerTriggered: null,
+        triggerComplete: null,
+        triggerVia: null,
+        triggerReason: 'unreadable',
+        triggerRefused: false,
+      }),
+    ).rejects.toThrow('attempt_refusal_shape')
+  })
+
+  it('reddedildi ve tetiklenmedi → kabul edilir', async () => {
+    await expect(
+      insertAttempt(caseResultId, {
+        triggerRefused: true,
+        triggerTriggered: false,
+        triggerRefusals: '[{"skill":"docx","reason":"the host denied permission"}]',
+      }),
+    ).resolves.toBeTypeOf('string')
+  })
+})
+
+/**
+ * 0.2.0 — hook olayı hook'suz olamaz.
+ *
+ * Kayıtta "bir hook koştu ama hangisi bilinmiyor" diyen bir satır, hook'u hiç
+ * kaydetmemekten daha kötü: bir şey ölçüldüğü izlenimi verir.
+ */
+describe('hook olayı kendi verisini taşımak zorunda', () => {
+  let attemptId: string
+
+  beforeAll(async () => {
+    const suiteId = await makeSuite()
+    const caseId = await makeCase(suiteId)
+    const runId = await makeRun(suiteId)
+    const caseResultId = await makeCaseResult(runId, caseId)
+    attemptId = await insertAttempt(caseResultId)
+  })
+
+  const insertEvent = (seq_: number, kind: string, hook: string | null) =>
+    run(
+      `INSERT INTO "TraceEvent" ("id","attemptId","seq","kind","hook")
+       VALUES ($1,$2,$3,$4::"TraceEventKind",$5::jsonb)`,
+      [next(), attemptId, seq_, kind, hook],
+    )
+
+  it('HOOK olayı hook verisi olmadan reddedilir', async () => {
+    await expect(insertEvent(901, 'HOOK', null)).rejects.toThrow('traceevent_hook_shape')
+  })
+
+  it('HOOK olmayan olaya hook verisi iliştirilemez', async () => {
+    await expect(
+      insertEvent(902, 'TOOL_CALL', '{"name":"H","event":"E","phase":"started"}'),
+    ).rejects.toThrow('traceevent_hook_shape')
+  })
+
+  it('hook verisi taşıyan HOOK olayı kabul edilir', async () => {
+    await insertEvent(
+      903,
+      'HOOK',
+      '{"name":"SessionStart:startup","event":"SessionStart","phase":"response","exitCode":0}',
+    )
+    const rows = await db.query(`SELECT "hook" FROM "TraceEvent" WHERE "seq"=903`)
+    expect(rows.rows).toHaveLength(1)
+  })
+})

@@ -14,6 +14,8 @@
 
 import {
   comparePins,
+  diffEnvironments,
+  type EnvironmentChange,
   type Pins,
   type Proportion,
   type Run,
@@ -46,9 +48,24 @@ export interface RunComparison {
   drifted: readonly (keyof Pins)[]
   /** Ölçülemeyen pin adları — kaymadı, ama tuttuğu da bilinmiyor. */
   unavailable: readonly (keyof Pins)[]
+  /**
+   * `environmentHash` kaydıysa hash'in içinde kayan alanlar.
+   *
+   * Boş olması "ortam kaymadı" demek değil: iki kayıttan biri ortam
+   * bileşenlerini taşımıyorsa (0.3.0-a öncesi kayıtlar) hash düzeyinde
+   * konuşulur ve burası boş kalır.
+   */
+  environmentChanges: readonly EnvironmentChange[]
   cases: readonly CaseComparison[]
   verdict: Verdict
+  /** Karşılaştırmayı durduran sebep. Kayan pin varsa yalnızca o. */
   reason: string
+  /**
+   * İkincil eksiklik: bir pin kaydığı hâlde başka bir pin de okunamadıysa.
+   * Karşılaştırmayı durduran o değil — kayma zaten durduruyor — ama kayma
+   * olmasaydı da koşulların aynı olduğu gösterilemezdi.
+   */
+  note?: string
 }
 
 /**
@@ -69,18 +86,43 @@ export function compareRuns(before: Run, after: Run): RunComparison {
     if (pins.drifted.length > 0) {
       parts.push(`${pins.drifted.join(', ')} changed between them`)
     }
-    if (pins.unavailable.length > 0) {
+    // Hash "bir şey değişti" der; okuyucunun ihtiyacı olan "ne değişti".
+    const environmentChanges =
+      pins.drifted.includes('environmentHash') &&
+      before.environment !== undefined &&
+      after.environment !== undefined
+        ? diffEnvironments(before.environment, after.environment)
+        : []
+    if (environmentChanges.length > 0) {
       parts.push(
-        `${pins.unavailable.join(', ')} could not be read in one or both runs, so the conditions cannot be shown to match`,
+        `the host environment moved in ${environmentChanges
+          .map((c) => `${c.field}: ${c.before} → ${c.after}`)
+          .join('; ')}`,
       )
+    }
+    // Okunamayan pin, kayma yoksa sebebin kendisi (değişmez #2: eksik pin de
+    // karşılaştırmayı durdurur); kayma varsa ayrı bir not. Aynı cümlede
+    // durunca hangisinin durdurduğu okunmuyordu.
+    const unread =
+      pins.unavailable.length > 0
+        ? `${pins.unavailable.join(', ')} could not be read in one or both runs`
+        : undefined
+    if (unread !== undefined && parts.length === 0) {
+      parts.push(`${unread}, so the conditions cannot be shown to match`)
     }
     return {
       comparable: false,
       drifted: pins.drifted,
       unavailable: pins.unavailable,
+      environmentChanges,
       cases: [],
       verdict: 'unknown',
       reason: `the runs are not comparable: ${parts.join('; ')}`,
+      ...(unread !== undefined && pins.drifted.length > 0
+        ? {
+            note: `${unread}, so even without that change the conditions could not be shown to match`,
+          }
+        : {}),
     }
   }
 
@@ -103,6 +145,7 @@ export function compareRuns(before: Run, after: Run): RunComparison {
     comparable: true,
     drifted: [],
     unavailable: [],
+    environmentChanges: [],
     cases,
     verdict: regressed.length > 0 ? 'fail' : unresolved.length > 0 ? 'unknown' : 'pass',
     reason:

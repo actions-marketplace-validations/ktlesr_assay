@@ -1,0 +1,33 @@
+# K0 kapasite ölçümü — YAYIMLANMAZ, YÜKLENMEZ.
+# impeccable.suite.yaml'dan (ölçüm deposu) iki vaka, kelimesi kelimesine:
+# en ağır tetiklenme vakası (4.2.2'de bypassPermissions altında ort. 271 sn;
+# npm install, vite dev sunucusu, Playwright/Chromium) ve suite'in geçerli
+# olması için bir negatif (değişmez #5).
+version: 1
+
+target:
+  skill: impeccable
+  source: pbakaus/impeccable@831cabee8b4bc1a2b66e5ae22003e9a19b57d464
+
+environment:
+  host: claude-code
+  model: claude-haiku-4-5-20251001
+  system_prompt_hash: not-provided-by-host
+  active_skills: [impeccable]
+
+runs: 2
+
+cases:
+  - id: trigger.positive.hero_direction
+    prompt: >-
+      src/routes/landing.tsx is our hero and it reads like a wireframe - system
+      font, one blue button, no hierarchy. Give it a real visual direction and
+      build it: type, colour, spacing, the lot. Decide the direction yourself.
+    setup: { fixtures: ../fixtures/impeccable-app }
+    expect: { triggered: true }
+
+  - id: trigger.negative.unrelated.slow_query
+    prompt: >-
+      This Postgres query for monthly revenue takes 12 seconds on 4M rows.
+      Work out which index it is missing.
+    expect: { triggered: false }

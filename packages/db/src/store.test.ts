@@ -8,6 +8,7 @@ import { proportion, type Attempt, type Run, type Suite } from '@ktlsr/assay-cor
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { PrismaClient } from '../generated/client/client.js'
 import {
+  RecordShapeError,
   RunAlreadyStoredError,
   listRuns,
   loadRun,
@@ -104,8 +105,10 @@ const attempt = (index: number, verdict: 'pass' | 'fail' | 'unknown'): Attempt =
     available: true,
     triggered: true,
     skills: ['widget-manifest'],
+    refused: false,
+    refusals: [],
     complete: true,
-    via: 'Skill tool call in stream-json',
+    via: 'confirmed Skill activation in stream-json',
   },
   assertions: [
     {
@@ -171,6 +174,94 @@ describe('storeRun', () => {
     const loaded = await loadRun(db, run.id, ALL)
     expect(loaded).not.toBeNull()
     expect(loaded).toEqual(run)
+  })
+
+  it('ortam kaydi gercek bir veritabani gidis-donusunden sagam cikar', async () => {
+    // Yerel store ile hosted şema ayrışmasın: `Run.environment` core'da
+    // tanımlı, jsonb sütunu onun ikinci kalıcılık hedefi.
+    const environment = {
+      model: 'claude-haiku-4-5-20251001',
+      version: '2.1.263',
+      permissionMode: 'bypassPermissions',
+      tools: ['Bash', 'Read'],
+      skills: ['impeccable'],
+      agents: [],
+      plugins: ['impeccable@4.2.2'],
+    }
+    const run = { ...makeRun('run-roundtrip-env'), environment }
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.environment).toEqual(environment)
+  })
+
+
+  it('yarim kosum kunyesi kayit satirinda durur ve geri okunur', async () => {
+    // Kurtarılan kayıt hosted tarafta da yarım olduğunu söylemeli; yoksa
+    // yüklendiği anda tam bir ölçüm gibi görünürdü.
+    const partial = {
+      reason: 'the run was interrupted before it finished',
+      recoveredAt: '2026-09-08T11:00:00.000Z',
+      droppedLines: 1,
+    }
+    const run = { ...makeRun('run-roundtrip-partial'), partial }
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.partial).toEqual(partial)
+  })
+
+  it('es zamanlilik kayit satirinda durur ve geri okunur', async () => {
+    const run = { ...makeRun('run-roundtrip-conc'), concurrency: 4 }
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.concurrency).toBe(4)
+  })
+
+  it('Assay surumu gercek bir veritabani gidis-donusunden sag cikar (0.3.2)', async () => {
+    const run = { ...makeRun('run-roundtrip-version'), assayVersion: '0.3.2' }
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    expect((await loadRun(db, run.id, ALL))?.assayVersion).toBe('0.3.2')
+
+    // Sürümsüz kayıt sürümsüz döner — `null` değil, alan hiç yok.
+    const old = makeRun('run-roundtrip-noversion')
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run: old })
+    const loaded = await loadRun(db, old.id, ALL)
+    expect(loaded !== null && 'assayVersion' in loaded).toBe(false)
+  })
+
+  it('sirali kosumda es zamanlilik alani hic yazilmaz', async () => {
+    const run = makeRun('run-roundtrip-serial')
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.concurrency).toBeUndefined()
+  })
+  it('normal biten kosumda yarim kunyesi hic yazilmaz', async () => {
+    const run = makeRun('run-roundtrip-complete')
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.partial).toBeUndefined()
+  })
+
+it('katmanlar ve atlanan vakalar gidis-donusten sagam cikar', async () => {
+    const run = {
+      ...makeRun('run-roundtrip-fast'),
+      layers: ['trigger'] as const,
+      skipped: [
+        { caseId: 'complete.only_artifact', reason: 'the case only declares assertions', cause: 'layer' as const },
+      ],
+    }
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.layers).toEqual(['trigger'])
+    expect(loaded?.skipped).toEqual(run.skipped)
+  })
+
+  it('tam kosumda katman ve atlama alanlari hic yazilmaz', async () => {
+    const run = makeRun('run-roundtrip-fulllayers')
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.layers).toBeUndefined()
+    expect(loaded?.skipped).toBeUndefined()
   })
 
   it('izi, assertion sonuçlarını ve ortam farkını korur', async () => {
@@ -286,5 +377,95 @@ describe('RunScope', () => {
   it('yönetici her şeyi görür', async () => {
     const run = await loadRun(db, 'run-private', { kind: 'all' })
     expect(run?.id).toBe('run-private')
+  })
+})
+
+/**
+ * 0.4.0 — bir çakışma suite'i hosted tarafa gerçekten yüklenebiliyor mu?
+ *
+ * `case_measures_something` kısıtı güncellenmeseydi `winner: none` vakası
+ * reddedilir ve suite hiç yüklenemezdi; id kısıtı güncellenmeseydi tireli id.
+ */
+describe('çakışma suite\'i gidiş-dönüş (0.4.0)', () => {
+  it('tireli id, winner ve winner: none tasiyan kosum yazilip aynen geri okunuyor', async () => {
+    const collision: Suite = {
+      ...SUITE,
+      target: { skill: 'marketing-skills:cro', source: 'o/r@1' },
+      environment: { ...SUITE.environment, active_skills: ['marketing-skills:cro', 'marketing-skills:copy-editing'] },
+      cases: [
+        { id: 'collide.copy-editing.tighten', prompt: 'p', expect: { winner: 'marketing-skills:copy-editing' } },
+        { id: 'negative.pricing', prompt: 'p', expect: { winner: 'none' } },
+      ],
+    }
+    const base = makeRun('run-roundtrip-collision')
+    const template = base.cases[0] as NonNullable<(typeof base.cases)[number]>
+    const run: Run = {
+      ...base,
+      cases: [
+        { ...template, caseId: 'collide.copy-editing.tighten', expectedWinner: ['marketing-skills:copy-editing'] },
+        { ...template, caseId: 'negative.pricing', expectedWinner: [] },
+      ],
+    }
+    await storeRun(db, { suite: collision, suiteHash: 'sha256:collision', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded?.cases.map((c) => [c.caseId, c.expectedWinner])).toEqual([
+      ['collide.copy-editing.tighten', ['marketing-skills:copy-editing']],
+      ['negative.pricing', []],
+    ])
+  })
+})
+
+/**
+ * 0.2.0 öncesi kayıtlar (0.4.1-a). İlk gerçek `assay push`ta ölçüm
+ * deposundaki on kaydın hiçbiri yüklenemedi: tetiklenme gözleminde `refused`
+ * ve `refusals` yoktu ve eşleme onları varsayıyordu.
+ */
+describe('0.2.0 öncesi kayıt', () => {
+  const legacy = (run: Run): Run => ({
+    ...run,
+    cases: run.cases.map((result) => ({
+      ...result,
+      attempts: result.attempts.map((a) => {
+        if (!a.trigger.available) return a
+        const trigger = { ...a.trigger }
+        delete trigger.refused
+        delete trigger.refusals
+        return { ...a, trigger }
+      }),
+    })),
+  })
+
+  it('saklanır ve aktivasyon kontrolü "yapılmadı" olarak geri döner', async () => {
+    const run = legacy(makeRun('run-legacy-activation'))
+    await storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    const loaded = await loadRun(db, run.id, ALL)
+    expect(loaded).toEqual(run)
+    // `false` değil: alan hiç yok. "Red yok" ile "kimse bakmadı" ayrı şeyler.
+    const trigger = loaded?.cases[0]?.attempts[0]?.trigger
+    expect(trigger !== undefined && 'refused' in trigger).toBe(false)
+  })
+
+  it('bozuk kayıt nerede bozuk olduğunu söyler ve hiçbir şey yazılmaz', async () => {
+    const base = makeRun('run-malformed')
+    const [first] = base.cases
+    if (first === undefined) throw new Error('makeRun returned no case')
+    const broken = { ...first.attempts[1]!, trigger: undefined as never }
+    const run = { ...base, cases: [{ ...first, attempts: [first.attempts[0]!, broken] }] }
+    const stored = storeRun(db, { suite: SUITE, suiteHash: 'sha256:bbb', run })
+    await expect(stored).rejects.toBeInstanceOf(RecordShapeError)
+    await expect(stored).rejects.toThrow(/malformed at case "trigger\.positive\.explicit", attempt 1: /)
+    expect(await loadRun(db, run.id, ALL)).toBeNull()
+  })
+})
+
+/** 0.4.1-f: yükleyen, koşumunun ziyaretçiye açık olup olmadığını bilmeli. */
+describe('storeRun görünürlüğü söyler', () => {
+  it('yeni vaka seti gizli, yayımlanmış olana yazılan koşum açık döner', async () => {
+    const suite = { ...SUITE, version: 7 }
+    const first = await storeRun(db, { suite, suiteHash: 'sha256:vis', run: makeRun('run-vis-1') })
+    expect(first.suitePublic).toBe(false)
+    await db.suite.update({ where: { id: first.suiteId }, data: { public: true } })
+    const second = await storeRun(db, { suite, suiteHash: 'sha256:vis', run: makeRun('run-vis-2') })
+    expect(second.suitePublic).toBe(true)
   })
 })

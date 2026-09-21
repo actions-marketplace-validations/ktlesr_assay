@@ -21,8 +21,35 @@ import { z } from 'zod'
 // Şema
 // ---------------------------------------------------------------------------
 
-/** Hiyerarşik vaka kimliği: `trigger.negative.near_neighbor.pdf` */
-const CASE_ID = /^[a-z0-9]+(?:\.[a-z0-9_]+)+$/
+/**
+ * Hiyerarşik vaka kimliği: `trigger.negative.near_neighbor.pdf`,
+ * `collide.copy-editing.tighten_paragraph`.
+ *
+ * 0.4.0: tire her segmentte serbest. Skill adları çoğunlukla tireli
+ * (`copy-editing`, `cold-email`) ve çakışma suite'i skill'in adını id'ye
+ * yazamıyordu. Eski desenin tam üst kümesi: ilk segment harf/rakamla, sonrakiler
+ * eskisi gibi `_` ile de başlayabilir; hiçbiri tireyle başlayamaz.
+ */
+const CASE_ID = /^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9_][a-z0-9_-]*)+$/
+
+/**
+ * Geçersiz bir id'nin neden geçersiz olduğu.
+ *
+ * Eski mesaj yalnızca "hierarchical and lowercase" diyordu; 20 tireli id için
+ * 20 kez aynı cümle basıldı ve hiçbiri sorunun tire olduğunu söylemedi.
+ */
+function caseIdProblem(id: string): string {
+  const illegal = [...id].find((ch) => !/[a-z0-9_.-]/.test(ch))
+  if (illegal !== undefined) {
+    return /[A-Z]/.test(illegal)
+      ? `case id "${id}" contains "${illegal}": ids are lowercase`
+      : `case id "${id}" contains "${illegal}": segments may use a-z, 0-9, "_" and "-"`
+  }
+  if (!id.includes('.')) {
+    return `case id "${id}" has one segment: ids are hierarchical, e.g. "trigger.positive.explicit"`
+  }
+  return `case id "${id}" has an empty segment or one that starts with "-": each segment starts with a letter or digit ("_" is also allowed after the first)`
+}
 
 /** `near_neighbor` segmenti taşıyan negatif vaka, tetiklenme suite'inin asıl sinyali. */
 const NEAR_NEIGHBOR_SEGMENT = 'near_neighbor'
@@ -35,12 +62,9 @@ export const TRACE_RULES = [
   'tool_args_valid',
 ] as const
 
-const caseIdSchema = z
-  .string()
-  .regex(
-    CASE_ID,
-    'case id must be hierarchical and lowercase, e.g. "trigger.positive.explicit"',
-  )
+const caseIdSchema = z.string().superRefine((id, ctx) => {
+  if (!CASE_ID.test(id)) ctx.addIssue({ code: 'custom', message: caseIdProblem(id) })
+})
 
 const assertionSchema = z.discriminatedUnion('type', [
   z.object({
@@ -93,8 +117,51 @@ const expectSchema = z.object({
    * dosyalarını bozar.
    */
   not_triggered: z.array(z.string().min(1)).optional(),
+  /**
+   * Çakışma: bu vakada **ilk tetiklenmesi** gereken skill (0.4.0).
+   *
+   * `winner: <skill>` — o skill ilk doğrulanmış aktivasyon olmalı.
+   * `winner: [a, b]` — tartışmalı vaka: ikisinden biri ilk olursa geçer.
+   * `winner: none` — hiçbir aktif skill tetiklenmemeli (çakışma negatifi).
+   *
+   * `not_triggered`in pozitif karşılığı. O alan yalnız "şunlar tetiklenmesin"
+   * diyebildiği için hiçbir şeyin tetiklenmediği bir koşum da onu sağlıyordu;
+   * marketingskills koşumunda 100 pozitif deneme böyle `pass` sayıldı.
+   */
+  winner: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional(),
   assertions: z.array(assertionSchema).optional(),
 })
+
+/**
+ * Değişmez #5'in "negatif vaka" tanımı — TEK yer.
+ *
+ * `triggered: false` ya da `winner: none`. Bu tanım eskiden iki yerde yazılıydı
+ * (doğrulayıcı ve veritabanı katmanı); 0.4.0'da biri güncellenip öteki
+ * unutulunca bir çakışma suite'i doğrulamadan geçip hosted tarafa yüklenemedi.
+ */
+export function isNegativeCase(c: { expect: { triggered?: boolean | undefined; winner?: string | readonly string[] | undefined } }): boolean {
+  if (c.expect.triggered === false) return true
+  const winner = expectedWinnerOf(c.expect)
+  return winner !== undefined && winner.length === 0
+}
+
+/** `winner: none` — ayrılmış sözcük; bir skill adı değil. */
+export const WINNER_NONE = 'none'
+
+/**
+ * Vakanın beklenen kazananı, kayda gidecek biçimde.
+ *
+ * `undefined` — vaka kazanan iddiasında bulunmuyor. `[]` — hiçbir skill
+ * tetiklenmemeli (`winner: none`). Aksi hâlde ilk tetiklenmesi kabul edilen
+ * skill'ler; birden fazlaysa biri yeter.
+ */
+export function expectedWinnerOf(
+  expect: { winner?: string | readonly string[] | undefined },
+): readonly string[] | undefined {
+  if (expect.winner === undefined) return undefined
+  const list = typeof expect.winner === 'string' ? [expect.winner] : [...expect.winner]
+  return list.length === 1 && list[0] === WINNER_NONE ? [] : list
+}
 
 const caseSchema = z.object({
   id: caseIdSchema,
@@ -286,6 +353,82 @@ function checkAssertions(c: SuiteCase, index: number, issues: SuiteIssue[]): voi
   })
 }
 
+/**
+ * `expect.winner`in tutarlılığı (0.4.0).
+ *
+ * Kazanan, kurulu skill'lerden biri olmalı; yoksa vaka hiçbir koşumda
+ * geçemez ve bu, ölçümden önce söylenmeli.
+ */
+function checkWinner(
+  suite: Suite,
+  c: SuiteCase,
+  at: string,
+  winner: readonly string[],
+  activeSkills: ReadonlySet<string>,
+  issues: SuiteIssue[],
+): void {
+  const path = `${at}.expect.winner`
+  const raw = c.expect.winner
+  const declared = typeof raw === 'string' ? [raw] : [...(raw ?? [])]
+
+  if (activeSkills.size === 0) {
+    issues.push(
+      error(
+        path,
+        `case "${c.id}" names a winner, but environment.active_skills is empty: declare the skills installed together`,
+      ),
+    )
+    return
+  }
+  if (activeSkills.has(WINNER_NONE)) {
+    issues.push(
+      error(
+        'environment.active_skills',
+        `"${WINNER_NONE}" is reserved for expect.winner and cannot be a skill name`,
+      ),
+    )
+  }
+  if (declared.length > 1 && declared.includes(WINNER_NONE)) {
+    issues.push(
+      error(path, `case "${c.id}": "${WINNER_NONE}" cannot be combined with other winners`),
+    )
+    return
+  }
+  for (const skill of winner) {
+    if (!activeSkills.has(skill)) {
+      issues.push(
+        error(
+          path,
+          `case "${c.id}" expects "${skill}" to win, but it is not listed in environment.active_skills`,
+        ),
+      )
+    }
+  }
+  const excluded = winner.filter((skill) => c.expect.not_triggered?.includes(skill))
+  if (excluded.length > 0) {
+    issues.push(
+      error(
+        path,
+        `case "${c.id}" expects ${excluded.join(', ')} to win and also lists it in not_triggered`,
+      ),
+    )
+  }
+  const target = suite.target.skill
+  if (c.expect.triggered === false && winner.length === 1 && winner[0] === target) {
+    issues.push(
+      error(path, `case "${c.id}" expects "${target}" to win but also expects it not to trigger`),
+    )
+  }
+  if (c.expect.triggered === true && winner.length === 0) {
+    issues.push(
+      error(
+        path,
+        `case "${c.id}" expects "${target}" to trigger but also expects no skill to trigger`,
+      ),
+    )
+  }
+}
+
 function checkCases(suite: Suite, issues: SuiteIssue[]): void {
   const seen = new Map<string, number>()
   const activeSkills = new Set(suite.environment.active_skills ?? [])
@@ -308,9 +451,11 @@ function checkCases(suite: Suite, issues: SuiteIssue[]): void {
     }
 
     const { triggered, not_triggered: notTriggered, assertions } = c.expect
+    const winner = expectedWinnerOf(c.expect)
 
     if (
       triggered === undefined &&
+      winner === undefined &&
       (assertions?.length ?? 0) === 0 &&
       (notTriggered?.length ?? 0) === 0
     ) {
@@ -322,10 +467,32 @@ function checkCases(suite: Suite, issues: SuiteIssue[]): void {
       )
     }
 
-    if (triggered === false) {
+    /*
+     * 0.4.0 — yalnız `not_triggered` taşıyan vaka hiçbir şey tetiklenmediğinde
+     * de geçer. Tek hedefli suite'te bu meşru ("komşular tetiklenmesin"); çakışma
+     * suite'inde ise tam da 100 sahte `pass`in kaynağıydı. Hata değil uyarı.
+     */
+    if (
+      triggered === undefined &&
+      winner === undefined &&
+      (assertions?.length ?? 0) === 0 &&
+      (notTriggered?.length ?? 0) > 0
+    ) {
+      issues.push(
+        warning(
+          `${at}.expect`,
+          `case "${c.id}" only lists skills that must not trigger, so it also passes when no skill triggers at all — if you mean one skill should win, use expect.winner`,
+        ),
+      )
+    }
+
+    // `winner: none` çakışma suite'inin negatifi: değişmez #5 onu da sayar.
+    if (isNegativeCase(c)) {
       negatives += 1
       if (c.id.split('.').includes(NEAR_NEIGHBOR_SEGMENT)) nearNeighbours += 1
     }
+
+    if (winner !== undefined) checkWinner(suite, c, at, winner, activeSkills, issues)
 
     if (notTriggered !== undefined && notTriggered.length > 0) {
       if (activeSkills.size === 0) {

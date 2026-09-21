@@ -68,9 +68,11 @@ export async function Landing() {
           <>
             <RunTerminal run={failing.latest.run} />
             <p className="term-gloss">
-              A recorded run, replayed. Nine cases, ten attempts each. Assay does not
-              round the failure up, and it does not hide how wide the interval still is at
-              ten attempts.
+              {/* Sayılar koşumdan: öne çıkan suite yayımlananlara göre değişiyor. */}
+              A recorded run, replayed: {failing.latest.run.cases.length} cases,{' '}
+              {failing.latest.run.runs} attempts each. Assay does not round the failure up,
+              and it does not hide how wide the interval still is at{' '}
+              {failing.latest.run.runs} attempts.
             </p>
           </>
         )}
@@ -85,7 +87,8 @@ export async function Landing() {
               Sign in
             </Link>
           )}
-          <code className="code">npx assay run ./my-skill.suite.yaml</code>
+          {/* Kapsamsız `assay` npm'de ilgisiz bir paket; kapsamlı ad şart. */}
+          <code className="code">npx @ktlsr/assay run ./my-skill.suite.yaml</code>
         </div>
       </section>
 
@@ -100,7 +103,7 @@ export async function Landing() {
         </section>
       ) : (
         <section className="section-major">
-          <h2 className="section-title">One case, measured ten times</h2>
+          <h2 className="section-title">One case, measured {worst.attempts.length} times</h2>
           <div className="specimen mt-10">
             <div className="specimen-head">
               <Badge verdict={worst.failed > 0 ? 'fail' : 'pass'} size={16} />
@@ -127,9 +130,13 @@ export async function Landing() {
               <span>{failing.latest.run.startedAt.slice(0, 10)}</span>
             </p>
           </div>
-          <p className="mt-8">
+          <p className="mt-8 flex flex-wrap gap-x-6 gap-y-2">
             <Link href={`/runs/${failing.latest.slug}`} className="link text-sm">
               Open the full scorecard
+            </Link>
+            {/* Tek öne çıkan suite ziyaretçinin ulaşabildiği tek ölçümdü (0.4.1). */}
+            <Link href="/suites" className="link text-sm">
+              Every published measurement
             </Link>
           </p>
         </section>
@@ -219,20 +226,26 @@ export async function Landing() {
       <section className="section-minor">
         <p className="rule-label mb-8">Getting started</p>
         <ol className="ruled steps">
+          {/* Kapsamsız `assay` npm'de ilgisiz bir paket: `npx assay` onu çalıştırır. */}
+          <Step command="npm install -g @ktlsr/assay" note="installs the CLI; the command is assay" />
           <Step
-            command="npx assay init ./my-skill"
-            note="writes an example case set next to the skill"
+            command="assay init ./my-skill.suite.yaml"
+            note="writes an example case set to fill in for your skill"
           />
           <Step
-            command="npx assay run ./my-skill.suite.yaml --skill ./my-skill"
-            note="runs it against the host, N times per case, stores the record locally"
+            command="assay run ./my-skill.suite.yaml --skill ./my-skill"
+            note="runs it against the host, N times per case, stores the record locally; --concurrency 4 runs attempts in parallel"
           />
           <Step
-            command="npx assay ci ./my-skill.suite.yaml"
+            command="assay run ./my-skill.suite.yaml --skill ./my-skill --fast"
+            note="three attempts per case, trigger layer only — minutes instead of hours. An early warning, not evidence"
+          />
+          <Step
+            command="assay ci ./my-skill.suite.yaml"
             note="the same run, with a CI exit code: 1 for a failure, 3 for nothing measured"
           />
           <Step
-            command="npx assay push --suite ./my-skill.suite.yaml"
+            command="assay push --suite ./my-skill.suite.yaml"
             note="optional — keeps the history here so the next run can be compared against it"
           />
         </ol>

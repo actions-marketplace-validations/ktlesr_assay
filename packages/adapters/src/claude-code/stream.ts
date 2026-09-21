@@ -9,7 +9,21 @@
  * Akışın şekli docs/host-feasibility.md'de deneyle belgelendi.
  */
 
-import type { SessionOutcome, TraceEvent } from '@ktlsr/assay-core'
+import type {
+  HookRecord,
+  RefusedActivation,
+  SessionOutcome,
+  TraceEvent,
+} from '@ktlsr/assay-core'
+
+/**
+ * Hook çıktısının kayda giren en fazla uzunluğu.
+ *
+ * Hook stdout'u gerçek koşumlarda on binlerce karakter olabiliyor ve kayıt bir
+ * CI artefaktı. Kesme sessiz değil: kesilen metnin sonunda toplam uzunluk
+ * yazıyor, yani okuyucu neyi görmediğini biliyor.
+ */
+const HOOK_OUTPUT_LIMIT = 2000
 
 // ---------------------------------------------------------------------------
 // Ham akış tipleri — host'un verdiği kadarı
@@ -30,6 +44,19 @@ export interface InitEvent {
   plugins: readonly { name: string; version?: string; source?: string }[]
 }
 
+/**
+ * Host'un reddettiği bir araç çağrısı.
+ *
+ * `result.permission_denials` alanı bunu zaten bildiriyor; 0.2.0'a kadar
+ * ayrıştırıcı okumuyordu ve red, sıradan bir araç hatasından ayırt
+ * edilemiyordu.
+ */
+export interface PermissionDenial {
+  tool: string
+  /** Reddedilen `tool_use` bloğunun kimliği. Host vermiyorsa yok. */
+  toolUseId?: string
+}
+
 /** Akışın son olayı. */
 export interface ResultEvent {
   subtype: string
@@ -43,14 +70,24 @@ export interface ResultEvent {
   outputTokens: number
   /** Ajanın son metni. */
   text?: string
+  /** Host'un reddettiği araç çağrıları. Boş dizi "red olmadı" demek. */
+  permissionDenials: PermissionDenial[]
 }
 
 export interface ParsedStream {
   init?: InitEvent
   result?: ResultEvent
   trace: TraceEvent[]
-  /** `Skill` aracıyla tetiklendiği gözlenen skill'ler, sırayla. */
+  /**
+   * **Aktive olduğu doğrulanan** skill'ler, sırayla.
+   *
+   * `Skill` çağrısının varlığı yetmez: eşleşen `tool_result` hatasız olmalı
+   * ve skill gövdesini taşımalı. Reddedilen bir çağrı buraya girmez,
+   * `refusals`a girer.
+   */
   triggeredSkills: string[]
+  /** Seçilmiş ama aktivasyonu doğrulanamamış skill çağrıları. */
+  refusals: RefusedActivation[]
   /** Ayrıştırılamayan satırlar. Boş değilse sinyal eksik olabilir. */
   malformed: number
 }
@@ -85,8 +122,52 @@ function contentToText(content: unknown): string | undefined {
   return JSON.stringify(content)
 }
 
-/** `session_end` sonucunu host'un bildirdiği alanlardan türetir. */
-export function outcomeOf(result: ResultEvent): SessionOutcome {
+/** Uzun hook çıktısını keser ve kestiğini söyler. */
+function clip(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined
+  return value.length <= HOOK_OUTPUT_LIMIT
+    ? value
+    : `${value.slice(0, HOOK_OUTPUT_LIMIT)}… (truncated, ${value.length} chars total)`
+}
+
+/** `system/hook_started` ve `system/hook_response` olaylarını kanonik hâle getirir. */
+function hookOf(event: Record<string, unknown>, phase: 'started' | 'response'): HookRecord {
+  const exitCode = num(event['exit_code'])
+  const outcome = str(event['outcome'])
+  const stdout = clip(str(event['stdout']))
+  const stderr = clip(str(event['stderr']))
+  return {
+    name: str(event['hook_name']) ?? '',
+    event: str(event['hook_event']) ?? '',
+    phase,
+    ...(exitCode === undefined ? {} : { exitCode }),
+    ...(outcome === undefined ? {} : { outcome }),
+    ...(stdout === undefined ? {} : { stdout }),
+    ...(stderr === undefined ? {} : { stderr }),
+  }
+}
+
+/** `result.permission_denials` — alan adları hem snake hem camel gelebiliyor. */
+function denialsOf(value: unknown): PermissionDenial[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    const tool = str(entry['tool_name']) ?? str(entry['toolName']) ?? str(entry['tool'])
+    if (tool === undefined) return []
+    const toolUseId = str(entry['tool_use_id']) ?? str(entry['toolUseId'])
+    return [{ tool, ...(toolUseId === undefined ? {} : { toolUseId }) }]
+  })
+}
+
+/**
+ * `session_end` sonucunu host'un bildirdiği alanlardan türetir.
+ *
+ * Girdi tam bir `ResultEvent` değil, yalnızca kullandığı üç alan: sonuç bu
+ * üçünden başka hiçbir şeye bakmasın diye.
+ */
+export function outcomeOf(
+  result: Pick<ResultEvent, 'isError' | 'subtype' | 'terminalReason'>,
+): SessionOutcome {
   if (result.isError) return 'error'
   if (result.terminalReason !== undefined && result.terminalReason !== 'completed') {
     return 'aborted'
@@ -113,22 +194,49 @@ export function parseStreamJson(source: string): unknown[] {
   return out
 }
 
+/** Bir `Skill` çağrısı ve akışta nereye düştüğü. */
+interface SkillCall {
+  skill: string
+  id: string | undefined
+  /** `trace` içinde `tool_call` olayının indeksi; tetiklenme onun ardına girer. */
+  at: number
+}
+
+/** Bir `Skill` çağrısının sonucu. */
+interface SkillOutcome {
+  isError: boolean
+  /** Sonucun metni. Skill gövdesi buradan gelir. */
+  text: string | undefined
+}
+
 /**
  * Ham olayları kanonik ize çevirir.
  *
- * `Skill` araç çağrısı hem `tool_call` hem `skill_trigger` üretir: birincisi iz
- * için, ikincisi tetiklenme ölçümü için. Tetiklenme sinyalinin tek kaynağı
- * budur — metinden çıkarım yapılmaz.
+ * **Tetiklenme, çağrının varlığı değil aktivasyonun doğrulanmasıdır.** Bir
+ * `Skill` araç çağrısı, ancak eşleşen `tool_result` hatasızsa ve skill
+ * gövdesini taşıyorsa `skill_trigger` üretir. Reddedilen, hata dönen ya da
+ * sonucu hiç gelmeyen bir çağrı `refusals`a girer ve tetiklenme sayılmaz;
+ * ölçüm o attempt için yapılmamıştır (değişmez #1).
+ *
+ * 0.2.0 öncesi yalnızca çağrıya bakıyordu: reddedilen dört aktivasyon dört
+ * tetiklenme olarak raporlandı ve precision %100 çıktı.
+ *
+ * `seq` numaraları döngü bittikten sonra atanıyor, çünkü bir çağrının
+ * tetiklenme sayılıp sayılmadığı ancak `tool_result` ve akışın sonundaki
+ * `permission_denials` görüldükten sonra bilinebiliyor.
  */
 export function parseSession(events: readonly unknown[]): ParsedStream {
-  const trace: TraceEvent[] = []
-  const triggeredSkills: string[] = []
+  const trace: Omit<TraceEvent, 'seq'>[] = []
+  const skillCalls: SkillCall[] = []
+  const skillOutcomes = new Map<string, SkillOutcome>()
   /** tool_use id → araç adı; tool_result'ı aracına bağlamak için. */
   const toolById = new Map<string, string>()
+  /** tool_use id → `trace` indeksi; red bilgisi sonradan işaretleniyor. */
+  const callIndexById = new Map<string, number>()
+  const resultIndexByCallId = new Map<string, number>()
   let init: InitEvent | undefined
   let result: ResultEvent | undefined
   let malformed = 0
-  let seq = 0
 
   for (const event of events) {
     if (!isRecord(event)) {
@@ -168,6 +276,19 @@ export function parseSession(events: readonly unknown[]): ParsedStream {
       continue
     }
 
+    // Hook'lar ölçümün görünmez değişkeni: sistem promptuna metin enjekte
+    // edebilir, araç çağrısını reddedebilirler. Akışta zaten varlar.
+    if (type === 'system') {
+      const subtype = str(event['subtype'])
+      if (subtype === 'hook_started' || subtype === 'hook_response') {
+        trace.push({
+          kind: 'hook',
+          hook: hookOf(event, subtype === 'hook_started' ? 'started' : 'response'),
+        })
+      }
+      continue
+    }
+
     if (type === 'result') {
       const usage = isRecord(event['usage']) ? event['usage'] : {}
       const text = str(event['result'])
@@ -190,6 +311,7 @@ export function parseSession(events: readonly unknown[]): ParsedStream {
         inputTokens: num(usage['input_tokens']) ?? 0,
         outputTokens: num(usage['output_tokens']) ?? 0,
         ...(text === undefined ? {} : { text }),
+        permissionDenials: denialsOf(event['permission_denials']),
       }
       continue
     }
@@ -210,22 +332,18 @@ export function parseSession(events: readonly unknown[]): ParsedStream {
         const id = str(block['id'])
         if (id !== undefined) toolById.set(id, tool)
         const args = isRecord(block['input']) ? block['input'] : undefined
-        seq += 1
+        const at = trace.length
         trace.push({
-          seq,
           kind: 'tool_call',
           tool,
           ...(id === undefined ? {} : { id }),
           ...(args === undefined ? {} : { args }),
         })
-        // Tetiklenme sinyali: Skill aracının input.skill alanı.
+        if (id !== undefined) callIndexById.set(id, at)
+        // Aday tetiklenme. Aktivasyonun doğrulanması döngüden sonra.
         if (tool === 'Skill' && args !== undefined) {
           const skill = str(args['skill'])
-          if (skill !== undefined) {
-            triggeredSkills.push(skill)
-            seq += 1
-            trace.push({ seq, kind: 'skill_trigger', skill })
-          }
+          if (skill !== undefined) skillCalls.push({ skill, id, at })
         }
         continue
       }
@@ -235,9 +353,11 @@ export function parseSession(events: readonly unknown[]): ParsedStream {
         const tool = id === undefined ? undefined : toolById.get(id)
         const isError = block['is_error'] === true
         const text = contentToText(block['content'])
-        seq += 1
+        if (id !== undefined) {
+          resultIndexByCallId.set(id, trace.length)
+          if (tool === 'Skill') skillOutcomes.set(id, { isError, text })
+        }
         trace.push({
-          seq,
           kind: 'tool_result',
           ...(id === undefined ? {} : { callId: id }),
           ...(tool === undefined ? {} : { tool }),
@@ -250,22 +370,113 @@ export function parseSession(events: readonly unknown[]): ParsedStream {
       if (kind === 'text') {
         const text = str(block['text'])
         if (text === undefined || text.trim() === '') continue
-        seq += 1
-        trace.push({ seq, kind: 'assistant_message', text })
+        trace.push({ kind: 'assistant_message', text })
       }
     }
   }
 
   if (result !== undefined) {
-    seq += 1
-    trace.push({ seq, kind: 'session_end', outcome: outcomeOf(result) })
+    trace.push({ kind: 'session_end', outcome: outcomeOf(result) })
+  }
+
+  // -------------------------------------------------------------------------
+  // Red: host zaten bildiriyor, 0.2.0'a kadar okunmuyordu
+  // -------------------------------------------------------------------------
+
+  const denials = result?.permissionDenials ?? []
+  const deniedIds = new Set(
+    denials.map((d) => d.toolUseId).filter((id): id is string => id !== undefined),
+  )
+  for (const denial of denials) {
+    if (denial.toolUseId === undefined) continue
+    // Red, çağrının SONUCUNA işlenir; sonuç hiç gelmediyse çağrının kendisine.
+    const index =
+      resultIndexByCallId.get(denial.toolUseId) ?? callIndexById.get(denial.toolUseId)
+    if (index === undefined) continue
+    const event = trace[index]
+    if (event !== undefined) {
+      trace[index] = {
+        ...event,
+        refusal: `the host denied permission to use ${denial.tool}`,
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Aktivasyon doğrulaması
+  // -------------------------------------------------------------------------
+
+  const triggeredSkills: string[] = []
+  const refusals: RefusedActivation[] = []
+  const activated: SkillCall[] = []
+
+  // Önce karar, sonra ekleme. İki aşama, çünkü `splice` sonraki indeksleri
+  // kaydırıyor ve red işaretleri ekleme öncesi indekslere dayanıyor.
+  for (const call of skillCalls) {
+    const reason = activationFailure(call, skillOutcomes, deniedIds)
+    if (reason === null) {
+      triggeredSkills.push(call.skill)
+      activated.push(call)
+      continue
+    }
+    refusals.push({ skill: call.skill, reason })
+    const index = call.id === undefined ? call.at : (resultIndexByCallId.get(call.id) ?? call.at)
+    const event = trace[index]
+    if (event !== undefined && event.refusal === undefined) {
+      trace[index] = { ...event, refusal: reason }
+    }
+  }
+
+  // Sondan başa eklemek, henüz işlenmemiş indekslerin kaymasını engelliyor.
+  for (const call of [...activated].reverse()) {
+    trace.splice(call.at + 1, 0, { kind: 'skill_trigger', skill: call.skill })
   }
 
   return {
     ...(init === undefined ? {} : { init }),
     ...(result === undefined ? {} : { result }),
-    trace,
+    trace: trace.map((event, index) => ({ ...event, seq: index + 1 })),
     triggeredSkills,
+    refusals,
     malformed,
   }
+}
+
+/**
+ * Bir `Skill` çağrısı neden aktivasyon sayılmadı — sayıldıysa `null`.
+ *
+ * Dört engel, hepsi yapısal (metin eşleştirmesi yok):
+ *  1. Host çağrıyı açıkça reddetti (`permission_denials`).
+ *  2. Eşleşen `tool_result` hata döndü.
+ *  3. Sonuç geldi ama gövde boş — skill'in içeriği oturuma girmedi.
+ *  4. Sonuç hiç gelmedi — aktivasyon doğrulanamadı.
+ *
+ * Tavan açık: 3 numara, host'un başarılı bir `Skill` sonucunu her zaman
+ * gövdeyle döndürdüğü varsayımına dayanıyor. Varsayım bozulursa her aktivasyon
+ * reddedilmiş görünür ve her vaka `unknown` olur — gürültülü ama sessiz geçiş
+ * değil (docs/adapters.md).
+ */
+function activationFailure(
+  call: SkillCall,
+  outcomes: ReadonlyMap<string, SkillOutcome>,
+  deniedIds: ReadonlySet<string>,
+): string | null {
+  if (call.id === undefined) {
+    return 'the Skill call carried no id, so its result could not be matched'
+  }
+  if (deniedIds.has(call.id)) {
+    return 'the host denied permission for the Skill call, so the skill never loaded'
+  }
+  const outcome = outcomes.get(call.id)
+  if (outcome === undefined) {
+    return 'the Skill call has no matching tool_result, so the activation was never confirmed'
+  }
+  if (outcome.isError) {
+    const detail = (outcome.text ?? '').trim().slice(0, 160)
+    return `the Skill call failed${detail === '' ? '' : `: ${detail}`}`
+  }
+  if ((outcome.text ?? '').trim() === '') {
+    return 'the Skill call succeeded but carried no skill body, so nothing was injected'
+  }
+  return null
 }

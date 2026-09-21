@@ -1,12 +1,6 @@
-import {
-  Badge,
-  EmptyState,
-  IntervalRule,
-  RateFigure,
-  countSentence,
-} from '@ktlsr/assay-ui'
-import Link from 'next/link'
+import { EmptyState } from '@ktlsr/assay-ui'
 import { Shell } from './components/shell'
+import { SuiteList } from './components/suite-list'
 import { Landing } from './landing'
 import { auth } from '../lib/auth'
 import { listSuites } from '../lib/runs'
@@ -40,50 +34,7 @@ export default async function Home() {
             not.
           </p>
 
-          <div className="ruled mt-12">
-            {suites.map(({ skill, runs, latest }, index) => (
-              <Link
-                key={skill}
-                href={`/suites/${encodeURIComponent(skill)}`}
-                className="row-link suite-row"
-              >
-                <span className="case-mark">
-                  <Badge verdict={latest.run.verdict} showLabel={false} size={16} />
-                </span>
-                <span className="min-w-0">
-                  <span className="suite-name">{skill}</span>
-                  <span className="case-count">
-                    {countSentence(latest.summary.trigger.recall, 'fired')} it should have
-                    {latest.summary.counts.unknown > 0 ? (
-                      <span className="ml-3 text-unknown">
-                        {latest.summary.counts.unknown} not measured
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="suite-meta">
-                    {runs.length} {runs.length === 1 ? 'run' : 'runs'} ·{' '}
-                    {latest.run.pins.model} · {latest.run.startedAt.slice(0, 10)}
-                  </span>
-                </span>
-                <span className="case-instrument">
-                  <IntervalRule
-                    value={latest.summary.trigger.recall}
-                    delayMs={Math.min(index * 45, 270)}
-                    tone={
-                      latest.run.verdict === 'pass'
-                        ? 'text-pass'
-                        : latest.run.verdict === 'fail'
-                          ? 'text-fail'
-                          : 'text-unknown'
-                    }
-                  />
-                </span>
-                <span className="case-figure">
-                  <RateFigure value={latest.summary.trigger.recall} />
-                </span>
-              </Link>
-            ))}
-          </div>
+          <SuiteList suites={suites} />
         </>
       )}
     </Shell>

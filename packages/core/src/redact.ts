@@ -42,15 +42,58 @@ const SECRET_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
  */
 /** Yol ayırıcıları, karakter sınıfı içinde kullanılmak üzere: `/` ve `\`. */
 const SEP = '/\\\\'
+/** Bir yol parçasında bulunamayan karakterler; kullanıcı adı bunlarda biter. */
+const STOP = `${SEP}\\s"'<>|:*?`
+
+/**
+ * Ters bölüleri yenmiş bir yolda adın bittiği yer. Kabuk `C:\Users\ada\AppData`
+ * yazımını `C:UsersadaAppData`ya çeviriyor (0.4.1-b, gerçek kayıtta görüldü);
+ * ayırıcı yok, ad bir Windows profil klasörüyle ya da yolun sonuyla bitiyor
+ * sayılıyor. Liste dışı bir klasörde maske yolun sonuna kadar uzar — fazla
+ * maskelemek, adı bırakmaktan iyidir.
+ */
+const PROFILE_DIRS =
+  'AppData|Desktop|Documents|Downloads|OneDrive|Pictures|Music|Videos|Favorites|Links|source|repos'
 
 const HOME_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+  // Ayırıcı birden çok olabilir: ajanın yazdığı kod dizgelerinde `\\` kaçışı.
+  ['windows-home', new RegExp(`([A-Za-z]:[${SEP}]+Users[${SEP}]+)([^${STOP}]+)`, 'g')],
   [
-    'windows-home',
-    new RegExp(`([A-Za-z]:[${SEP}]Users[${SEP}])([^${SEP}\\s"'<>|:*?]+)`, 'g'),
+    'windows-home-flattened',
+    new RegExp(`([A-Za-z]:Users)([^${STOP}]+?)(?=${PROFILE_DIRS}|[${STOP}]|$)`, 'g'),
   ],
-  ['macos-home', new RegExp(`(/Users/)([^${SEP}\\s"'<>|:*?]+)`, 'g')],
-  ['linux-home', new RegExp(`(/home/)([^${SEP}\\s"'<>|:*?]+)`, 'g')],
+  // Claude Code'un proje dizini adı: `C:\Users\ada` → `C--Users-ada`. Ad
+  // tire içeriyorsa yalnızca ilk parçası maskelenir; bilinen adlar (aşağıda)
+  // bu tavanı yerel kullanıcı için kapatıyor.
+  ['claude-project-slug', new RegExp(`([A-Za-z]--Users-)([^-${STOP}]+)`, 'g')],
+  ['macos-home', new RegExp(`(/Users/)([^${STOP}]+)`, 'g')],
+  ['linux-home', new RegExp(`(/home/)([^${STOP}]+)`, 'g')],
 ]
+
+/**
+ * Bilinen kullanıcı adları — genellikle kaydı yazan ya da okuyan makinenin
+ * hesabı. Core işletim sistemine bakamıyor; adı çağıran (runner, CLI) veriyor.
+ * Desenler adı yolun biçiminden tahmin ediyor; bilinen ad o tahmine gerek
+ * bırakmıyor ve desenlerin tavanlarını (tireli ad, noktalı ad) kapatıyor.
+ */
+export interface RedactOptions {
+  names?: readonly string[] | undefined
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Adın yol içindeki biçimleri: olduğu gibi ve Claude Code'un tireli hâli. */
+function namePatterns(names: readonly string[] | undefined): RegExp[] {
+  const variants = new Set<string>()
+  for (const name of names ?? []) {
+    if (name.length < 2 || GENERIC_HOME_SEGMENTS.has(name.toLowerCase())) continue
+    variants.add(name)
+    variants.add(name.replace(/[^A-Za-z0-9]/g, '-'))
+  }
+  return [...variants].map(
+    (name) => new RegExp(`((?:Users|home)(?:[${SEP}]+|-)?)(${escapeRegExp(name)})`, 'gi'),
+  )
+}
 
 /** Maskelenmeyen kullanıcı adları: gerçek bir kimlik taşımıyorlar. */
 const GENERIC_HOME_SEGMENTS = new Set([
@@ -69,10 +112,13 @@ const GENERIC_HOME_SEGMENTS = new Set([
  * Maskeleme yerine geçen etiket, hangi tür sırrın bulunduğunu söyler — silinen
  * şeyin ne olduğunu bilmek, hiçbir iz bırakmamaktan iyidir.
  */
-export function redact(text: string): string {
+export function redact(text: string, options: RedactOptions = {}): string {
   let out = text
   for (const [label, pattern] of SECRET_PATTERNS) {
     out = out.replace(pattern, `[redacted:${label}]`)
+  }
+  for (const pattern of namePatterns(options.names)) {
+    out = out.replace(pattern, (_match, prefix: string) => `${prefix}<user>`)
   }
   for (const [, pattern] of HOME_PATTERNS) {
     out = out.replace(pattern, (match, prefix: string, name: string) =>
@@ -88,11 +134,32 @@ export function containsSecret(text: string): boolean {
 }
 
 /** Metinde maskelenmemiş bir ev dizini kullanıcı adı var mı. */
-export function containsHomePath(text: string): boolean {
+export function containsHomePath(text: string, options: RedactOptions = {}): boolean {
+  if (
+    namePatterns(options.names).some((pattern) =>
+      new RegExp(pattern.source, 'i').test(text),
+    )
+  ) {
+    return true
+  }
   return HOME_PATTERNS.some(([, pattern]) => {
     const match = new RegExp(pattern.source).exec(text)
     return match !== null && !GENERIC_HOME_SEGMENTS.has((match[2] ?? '').toLowerCase())
   })
+}
+
+/**
+ * Bilinen bir ad, yol dışında da geçiyor mu — ör. ajanın yazdığı bir commit'in
+ * yazar satırında. Maskelenmiyor: yol dışında adın bir kimlik mi yoksa sıradan
+ * bir sözcük mü olduğu bilinemez. `push` bunu yüklemeden önce soruyor.
+ */
+export function containsName(text: string, names: readonly string[]): boolean {
+  return names.some(
+    (name) =>
+      name.length >= 3 &&
+      !GENERIC_HOME_SEGMENTS.has(name.toLowerCase()) &&
+      new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'i').test(text),
+  )
 }
 
 /**
@@ -101,12 +168,12 @@ export function containsHomePath(text: string): boolean {
  * Araç argümanları ve iz metinleri iç içe nesneler olabiliyor; yalnızca üst
  * seviyeyi maskelemek eksik olurdu.
  */
-export function redactDeep<T>(value: T): T {
-  if (typeof value === 'string') return redact(value) as T
-  if (Array.isArray(value)) return value.map((item) => redactDeep(item)) as T
+export function redactDeep<T>(value: T, options: RedactOptions = {}): T {
+  if (typeof value === 'string') return redact(value, options) as T
+  if (Array.isArray(value)) return value.map((item) => redactDeep(item, options)) as T
   if (typeof value === 'object' && value !== null) {
     const out: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value)) out[key] = redactDeep(item)
+    for (const [key, item] of Object.entries(value)) out[key] = redactDeep(item, options)
     return out as T
   }
   return value

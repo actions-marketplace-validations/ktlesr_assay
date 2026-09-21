@@ -70,7 +70,7 @@ every request passes every positive case and looks perfect; the near-neighbour
 case — a request that resembles the skill's scope but sits outside it — is the
 only thing that measures real discrimination.
 
-Full format: [docs/suite-format.md](https://github.com/ktlesr/assay/blob/main/docs/suite-format.md).
+Full format: [docs/suite-format.md](https://github.com/ktlesr/assay/blob/main/docs/suite-format.md) (Turkish).
 
 ## Four rules the output obeys
 

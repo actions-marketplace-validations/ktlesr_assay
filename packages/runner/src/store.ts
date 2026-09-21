@@ -13,6 +13,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { redactDeep, type Run } from '@ktlsr/assay-core'
+import { localNames } from './identity.js'
 
 /**
  * Dosya biçimi sürümü.
@@ -105,5 +106,5 @@ export function parseStored(raw: string, source = '<memory>'): Run {
    * koymak, tek bir kaydın bile maskelenmemiş bir yolu ekrana ya da bir
    * dosyaya taşımasını engelliyor.
    */
-  return redactDeep(record.run)
+  return redactDeep(record.run, { names: localNames() })
 }

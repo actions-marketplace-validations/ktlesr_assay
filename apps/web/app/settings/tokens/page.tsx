@@ -1,7 +1,9 @@
 import { prisma } from '@ktlsr/assay-db'
+import { headers } from 'next/headers'
 import { Button, EmptyState } from '@ktlsr/assay-ui'
 import { Shell } from '../../components/shell'
 import { requireUser } from '../../../lib/guard'
+import { originFrom } from '../../../lib/origin'
 import { revokeToken } from './actions'
 import { TokenForm } from './token-form'
 
@@ -14,6 +16,7 @@ import { TokenForm } from './token-form'
  */
 export default async function TokensPage() {
   const session = await requireUser('/settings/tokens')
+  const origin = originFrom(await headers())
 
   const tokens = await prisma().apiToken.findMany({
     where: { userId: session.user.id },
@@ -40,7 +43,7 @@ export default async function TokensPage() {
             description="Create one above, then set ASSAY_TOKEN in the environment where the CLI runs."
             action={
               <code className="font-mono text-xs text-text-faint">
-                assay push --url http://localhost:3000
+                assay push --url {origin}
               </code>
             }
           />

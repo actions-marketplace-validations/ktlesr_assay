@@ -65,6 +65,7 @@ export default async function ComparePage({
   return (
     <Shell
       breadcrumbs={[
+        { label: 'measurements', href: '/suites' },
         {
           label: after.run.skill,
           href: `/suites/${encodeURIComponent(after.run.skill)}`,
@@ -101,19 +102,47 @@ export default async function ComparePage({
         </section>
       ) : (
         <section className="mt-12">
-          <p className="rule-label mb-6">What drifted</p>
-          <ul className="ruled">
-            {comparison.drifted.map((pin) => (
-              <li key={pin} className="py-4 font-mono text-sm text-unknown">
-                {pin}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-8 max-w-[62ch] text-sm text-text-muted">
-            Any difference between these two runs could come from the condition that
-            moved. A score that dropped because the model changed is not a regression in
-            the skill, and reporting it as one would send you to fix the wrong thing.
-          </p>
+          {/*
+            Durduran sebep önce: kayan pin varsa o; okunamayan pin ayrı bir
+            not olarak altında. Kayma yoksa okunamayan pin sebebin kendisi.
+          */}
+          {comparison.drifted.length === 0 ? null : (
+            <>
+              <p className="rule-label mb-6">What changed</p>
+              <ul className="ruled">
+                {comparison.drifted.map((pin) => (
+                  <li key={pin} className="py-4 font-mono text-sm text-unknown">
+                    {pin}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-8 max-w-[62ch] text-sm text-text-muted">
+                Any difference between these two runs could come from the condition that
+                moved. A score that dropped because the model changed is not a regression
+                in the skill, and reporting it as one would send you to fix the wrong
+                thing.
+              </p>
+            </>
+          )}
+          {comparison.unavailable.length === 0 ? null : (
+            <div className={comparison.drifted.length === 0 ? undefined : 'mt-12'}>
+              <p className="rule-label mb-6">
+                {comparison.drifted.length === 0 ? 'What could not be read' : 'Also not readable'}
+              </p>
+              <ul className="ruled">
+                {comparison.unavailable.map((pin) => (
+                  <li key={pin} className="py-4 font-mono text-sm text-text-muted">
+                    {pin}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-8 max-w-[62ch] text-sm text-text-muted">
+                {comparison.note === undefined
+                  ? 'The host did not report this condition in one or both runs. Without it the two runs cannot be shown to share their conditions, so no case is compared.'
+                  : `Not what stopped this comparison: ${comparison.note}.`}
+              </p>
+            </div>
+          )}
         </section>
       )}
 

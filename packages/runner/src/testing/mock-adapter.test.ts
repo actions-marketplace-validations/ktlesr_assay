@@ -41,6 +41,8 @@ describe('MockAdapter — sözleşme', () => {
           available: true,
           triggered: true,
           skills: ['docx'],
+          refused: false,
+          refusals: [],
           complete: true,
           via: 'a',
         },

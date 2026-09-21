@@ -11,11 +11,19 @@
  */
 
 import {
+  expectedWinnerOf,
+  isNegativeCase,
   proportion,
   type Attempt,
   type CaseResult,
   type EnvDiff,
+  type Environment,
+  type HookRecord,
   type NetworkRequest,
+  type PartialRun,
+  type RefusedActivation,
+  type RunLayer,
+  type SkippedCase,
   type Run,
   type Suite,
   type SuiteCase,
@@ -40,6 +48,7 @@ const KIND_TO_DB = {
   assistant_message: 'ASSISTANT_MESSAGE',
   skill_trigger: 'SKILL_TRIGGER',
   session_end: 'SESSION_END',
+  hook: 'HOOK',
 } as const
 const KIND_FROM_DB: Record<string, TraceEvent['kind']> = Object.fromEntries(
   Object.entries(KIND_TO_DB).map(([k, v]) => [v, k as TraceEvent['kind']]),
@@ -73,6 +82,9 @@ export interface CaseRow {
   prompt: string
   expectTriggered: boolean | null
   notTriggered: string[]
+  /** Kazanan iddiası var mı; bayrak açık + boş dizi = `winner: none` (0.4.0). */
+  expectsWinner: boolean
+  expectedWinner: string[]
   assertions: unknown
   nearNeighbour: boolean
 }
@@ -89,7 +101,40 @@ export interface RunRow {
   pinSystemPromptHash: string
   pinSuiteVersion: number
   pinSuiteHash: string
+  /**
+   * Pin 3'ün denetçisi. Yerel kayıt bunu taşıyordu ama hosted tarafta hiç
+   * saklanmıyordu; sonuç, yüklenen her koşumda pin 3'ün "ölçülemedi" kalması
+   * ve karşılaştırmanın hep `unknown` üretmesiydi.
+   */
+  pinEnvironmentHash: string | null
+  permissionMode: string | null
+  /** Kaydı üreten Assay sürümü; null = 0.3.1 ya da öncesi (0.3.2). */
+  assayVersion: string | null
+  /**
+   * Hash'in girdisi olan ortam kaydı; host bildirmediyse null.
+   *
+   * Diğer jsonb sütunları gibi `unknown`: Prisma `JsonValue` döndürüyor ve
+   * daraltma okuma tarafında yapılıyor.
+   */
+  environment: unknown
+  /**
+   * Yarım kalmış koşumun künyesi; normal bitmişse null.
+   *
+   * Diğer jsonb sütunları gibi `unknown`; daraltma okuma tarafında.
+   */
+  partial: unknown
   runsPerCase: number
+  /**
+   * Aynı anda koşan deneme sayısı; 1 ise null.
+   *
+   * Ortam hash'ine girmiyor (host'un ortamı değil, koşum düzeni) ama kayıtta
+   * duruyor: gecikme ve maliyet eş zamanlı koşumda aynı şeyi ölçmüyor.
+   */
+  concurrency: number | null
+  /** Ölçülen katmanlar; boş = hepsi. */
+  layers: string[]
+  /** Koşulmamış vakalar ve sebepleri; diğer jsonb sütunları gibi `unknown`. */
+  skipped: unknown
   verdict: string
   unknownReason: string | null
 }
@@ -105,6 +150,9 @@ export interface CaseResultRow {
   ciLow: number | null
   ciHigh: number | null
   expectTriggered: boolean | null
+  /** Kazanan iddiası var mı; `expectedWinner` boşken `none` ile "iddia yok"u ayırır. */
+  expectsWinner: boolean
+  expectedWinner: string[]
 }
 
 export interface AttemptRow {
@@ -119,6 +167,8 @@ export interface AttemptRow {
   triggerVia: string | null
   triggerReason: string | null
   triggerSkills: string[]
+  triggerRefused: boolean | null
+  triggerRefusals: unknown
   latencyMs: number | null
   inputTokens: number | null
   outputTokens: number | null
@@ -143,6 +193,8 @@ export interface TraceEventRow {
   acknowledgesError: boolean | null
   skill: string | null
   outcome: string | null
+  refusal: string | null
+  hook: unknown
 }
 
 export interface EnvDiffRow {
@@ -180,6 +232,8 @@ export function toCaseRow(testCase: SuiteCase): CaseRow {
     prompt: testCase.prompt,
     expectTriggered: testCase.expect.triggered ?? null,
     notTriggered: [...(testCase.expect.not_triggered ?? [])],
+    expectsWinner: expectedWinnerOf(testCase.expect) !== undefined,
+    expectedWinner: [...(expectedWinnerOf(testCase.expect) ?? [])],
     assertions: testCase.expect.assertions ?? [],
     nearNeighbour: isNearNeighbour(testCase.id),
   }
@@ -198,7 +252,15 @@ export function toRunRow(run: Run): RunRow {
     pinSystemPromptHash: run.pins.systemPromptHash,
     pinSuiteVersion: run.pins.suiteVersion,
     pinSuiteHash: run.pins.suiteHash,
+    pinEnvironmentHash: run.pins.environmentHash ?? null,
+    permissionMode: run.permissionMode ?? null,
+    assayVersion: run.assayVersion ?? null,
+    environment: run.environment ?? null,
+    partial: run.partial ?? null,
     runsPerCase: run.runs,
+    concurrency: run.concurrency ?? null,
+    layers: [...(run.layers ?? [])],
+    skipped: run.skipped ?? null,
     verdict: VERDICT_TO_DB[run.verdict],
     // Değişmez #1: `unknown` gerekçesiz saklanamaz; kısıt bunu zorluyor,
     // burada gerekçe attempt'lerden toplanıyor.
@@ -211,6 +273,21 @@ function unknownReasonOf(run: Run): string {
     .flatMap((c) => c.attempts)
     .filter((a) => a.verdict === 'unknown')
     .map((a) => a.reason)
+  // Bütçe kesmesi koşumu `unknown` yapıyor ama hiçbir denemeyi yapmıyor; sebep
+  // denemelerde değil `skipped`da. Yedek cümleye düşseydi doğru karar yanlış
+  // gerekçeyle yazılırdı ("hiçbir deneme açıklamadı" — oysa açıklama belli).
+  const cut = (run.skipped ?? []).filter((s) => s.cause === 'budget').length
+  if (cut > 0) {
+    reasons.push(`the attempt budget cut ${cut} case(s), so the run cannot pass`)
+  }
+  // Yarım kayıt da hiçbir denemeyi `unknown` yapmadan `unknown`; sebep künyede.
+  const unreached = (run.skipped ?? []).filter((s) => s.cause === 'interrupted').length
+  if (unreached > 0) {
+    reasons.push(`the run was interrupted before ${unreached} case(s) started`)
+  }
+  if (run.partial !== undefined) {
+    reasons.push(`the record is incomplete, so it cannot pass: ${run.partial.reason}`)
+  }
   const unique = [...new Set(reasons)]
   return unique.length > 0
     ? unique.join(' | ').slice(0, 2000)
@@ -229,6 +306,8 @@ export function toCaseResultRow(result: CaseResult): CaseResultRow {
     ciLow: result.passRate.ci?.low ?? null,
     ciHigh: result.passRate.ci?.high ?? null,
     expectTriggered: result.expectedTrigger ?? null,
+    expectsWinner: result.expectedWinner !== undefined,
+    expectedWinner: [...(result.expectedWinner ?? [])],
   }
 }
 
@@ -246,6 +325,10 @@ export function toAttemptRow(attempt: Attempt): AttemptRow {
     triggerVia: trigger.available ? trigger.via : null,
     triggerReason: trigger.available ? null : trigger.reason,
     triggerSkills: trigger.available ? [...trigger.skills] : [],
+    // 0.2.0 öncesi kayıtta ikisi de yok: NULL "kontrol yapılmadı" demek,
+    // `[]` ise "kontrol yapıldı, red yok". Birbirine çevrilmezler (0.4.1-a).
+    triggerRefused: trigger.available ? (trigger.refused ?? null) : null,
+    triggerRefusals: trigger.available ? [...(trigger.refusals ?? [])] : [],
     latencyMs: attempt.latencyMs ?? null,
     inputTokens: attempt.cost?.inputTokens ?? null,
     outputTokens: attempt.cost?.outputTokens ?? null,
@@ -268,6 +351,8 @@ export function toTraceEventRow(event: TraceEvent): TraceEventRow {
     acknowledgesError: event.acknowledgesError ?? null,
     skill: event.skill ?? null,
     outcome: event.outcome === undefined ? null : OUTCOME_TO_DB[event.outcome],
+    refusal: event.refusal ?? null,
+    hook: event.hook ?? null,
   }
 }
 
@@ -305,6 +390,12 @@ export function fromTraceEventRow(row: TraceEventRow): TraceEvent {
       : { acknowledgesError: row.acknowledgesError }),
     ...(row.skill === null ? {} : { skill: row.skill }),
     ...(row.outcome === null ? {} : { outcome: OUTCOME_FROM_DB[row.outcome] }),
+    ...(row.refusal === null || row.refusal === undefined
+      ? {}
+      : { refusal: row.refusal }),
+    ...(row.hook === null || row.hook === undefined
+      ? {}
+      : { hook: row.hook as HookRecord }),
   }
 }
 
@@ -337,6 +428,14 @@ export function fromAttemptRow(
           available: true,
           triggered: row.triggerTriggered ?? false,
           skills: row.triggerSkills,
+          ...(row.triggerRefused === null
+            ? {}
+            : {
+                refused: row.triggerRefused,
+                refusals: Array.isArray(row.triggerRefusals)
+                  ? (row.triggerRefusals as RefusedActivation[])
+                  : [],
+              }),
           complete: row.triggerComplete ?? false,
           via: row.triggerVia ?? '',
         }
@@ -375,6 +474,8 @@ export function fromCaseResultRow(
   return {
     caseId: row.caseId,
     ...(row.expectTriggered === null ? {} : { expectedTrigger: row.expectTriggered }),
+    // Bayrak kapalıysa iddia yok; açık ve boşsa `winner: none`.
+    ...(row.expectsWinner ? { expectedWinner: row.expectedWinner } : {}),
     attempts,
     // Oran satırdan yeniden hesaplanmıyor, saklanan sayımlardan kuruluyor:
     // aynı `proportion` fonksiyonu, aynı sonuç.
@@ -401,7 +502,20 @@ export function fromRunRow(row: RunRow, cases: readonly CaseResult[]): Run {
       systemPromptHash: row.pinSystemPromptHash,
       suiteVersion: row.pinSuiteVersion,
       suiteHash: row.pinSuiteHash,
+      ...(row.pinEnvironmentHash === null ? {} : { environmentHash: row.pinEnvironmentHash }),
     },
+    ...(row.permissionMode === null ? {} : { permissionMode: row.permissionMode }),
+    // Null alan olarak geri gelmez; okuma `assayVersionLabel` ile "0.3.1 or
+    // earlier" der. Migration öncesi satırlarda sütun hiç olmayabilir.
+    ...(row.assayVersion === null || row.assayVersion === undefined
+      ? {}
+      : { assayVersion: row.assayVersion }),
+    ...(isEnvironment(row.environment) ? { environment: row.environment } : {}),
+    ...(isPartial(row.partial) ? { partial: row.partial } : {}),
+    ...(row.concurrency === null ? {} : { concurrency: row.concurrency }),
+    // Elle kurulmuş ve migration öncesi satırlarda alan hiç olmayabilir.
+    ...((row.layers ?? []).length === 0 ? {} : { layers: row.layers as RunLayer[] }),
+    ...(isSkipped(row.skipped) ? { skipped: row.skipped } : {}),
     runs: row.runsPerCase,
     cases,
     verdict,
@@ -426,7 +540,8 @@ export class SuiteNotStorableError extends Error {
  * *tamamına* bakıyor. Bu yüzden kaydetmeden önce burada kontrol edilir.
  */
 export function assertSuiteStorable(suite: Suite): void {
-  const negatives = suite.cases.filter((c) => c.expect.triggered === false)
+  // Tanım core'da tek yerde: `triggered: false` ya da `winner: none` (0.4.0).
+  const negatives = suite.cases.filter(isNegativeCase)
   if (negatives.length === 0) {
     throw new SuiteNotStorableError(
       'a trigger suite without a negative case cannot be stored: a skill that fires on ' +
@@ -438,7 +553,7 @@ export function assertSuiteStorable(suite: Suite): void {
 /** Uyarı düzeyinde: yakın komşu yoksa suite kaydedilir ama işaretlenir. */
 export function suiteWarnings(suite: Suite): string[] {
   const warnings: string[] = []
-  const negatives = suite.cases.filter((c) => c.expect.triggered === false)
+  const negatives = suite.cases.filter(isNegativeCase)
   if (negatives.length > 0 && !negatives.some((c) => isNearNeighbour(c.id))) {
     warnings.push(
       'no near-neighbour case: an unrelated negative is easy to pass, the discriminating ' +
@@ -446,4 +561,67 @@ export function suiteWarnings(suite: Suite): string[] {
     )
   }
   return warnings
+}
+
+/**
+ * Ortam kaydinin sekli yerinde mi.
+ *
+ * Sutun jsonb; oraya ne yazildigi calisma zamaninda bilinmiyor. Sekli
+ * tutmayan bir degeri Environment diye gecirmek, karsilastirmanin kayan alani
+ * yanlis okumasi demek olurdu — duzeltilen kusurun aynisi, bir katman
+ * asagida. Tutmuyorsa alan hic yazilmiyor ve karsilastirma hash duzeyinde
+ * konusuyor.
+ */
+function isEnvironment(value: unknown): value is Environment {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate['model'] === 'string' &&
+    typeof candidate['version'] === 'string' &&
+    Array.isArray(candidate['tools']) &&
+    Array.isArray(candidate['skills']) &&
+    Array.isArray(candidate['agents']) &&
+    Array.isArray(candidate['plugins'])
+  )
+}
+
+/**
+ * Yarim kalmis kosum kunyesinin sekli yerinde mi.
+ *
+ * Sebepsiz bir yarim kayit, bir durumu bildirip gerekcesini bildirmemek olurdu.
+ * Veritabani kisiti da ayni sarti zorluyor; burasi okuma tarafindaki karsiligi.
+ */
+function isPartial(value: unknown): value is PartialRun {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate['reason'] === 'string' &&
+    candidate['reason'].length > 0 &&
+    typeof candidate['recoveredAt'] === 'string'
+  )
+}
+
+/**
+ * Atlanan vaka listesinin sekli yerinde mi.
+ *
+ * Sebepsiz bir atlama, eksigi bildirip gerekcesini bildirmemek olurdu.
+ * Veritabani kisiti da ayni sarti zorluyor; burasi okuma tarafi.
+ */
+function isSkipped(value: unknown): value is SkippedCase[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as Record<string, unknown>)['caseId'] === 'string' &&
+        typeof (item as Record<string, unknown>)['reason'] === 'string' &&
+        ((item as Record<string, unknown>)['reason'] as string).length > 0 &&
+        // `cause` verdict'in dayandığı alan: eksikse kayıt "neden koşulmadı"yı
+        // biliyor ama "bu verdict'i etkiler mi"yi bilmiyor.
+        ['layer', 'budget', 'interrupted'].includes(
+          (item as Record<string, unknown>)['cause'] as string,
+        ),
+    )
+  )
 }

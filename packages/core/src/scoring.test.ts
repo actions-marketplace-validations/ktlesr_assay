@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { Attempt } from './records.js'
+import { proportion, type Attempt, type CaseResult, type Run } from './records.js'
 import {
+  collisionMatrix,
+  collisionPrefix,
   countVerdicts,
+  outsidePrefix,
   decidedRate,
   flakiness,
   summarize,
+  summarizeRun,
   totals,
   triggerAccuracy,
 } from './scoring.js'
@@ -176,7 +180,15 @@ describe('summarize', () => {
     trigger:
       triggered === null
         ? { available: false, reason: 'unreadable' }
-        : { available: true, triggered, skills: [], complete: true, via: 'test' },
+        : {
+            available: true,
+            triggered,
+            skills: [],
+            refused: false,
+            refusals: [],
+            complete: true,
+            via: 'test',
+          },
     assertions: [],
     verdict,
     reason: '',
@@ -296,5 +308,230 @@ describe('summarize', () => {
     )
     expect(summary.discrimination.attempts).toBe(0)
     expect(summary.discrimination.untested).toBe(false)
+  })
+})
+
+/**
+ * 0.2.0 — reddedilen aktivasyon doğruluk matrisine girmez.
+ *
+ * Impeccable pilotunda dört kayıtlı tetiklenmenin dördü de reddedilmiş
+ * aktivasyondu; hiçbiri koşmamıştı. Rapor precision %100 dedi çünkü
+ * `trigger.triggered` `true` idi. Sayı gerçek bir ölçümden gelmiyordu.
+ */
+describe('summarize — reddedilen aktivasyon ölçüm sayılmaz', () => {
+  const expected = (caseId: string) =>
+    caseId.startsWith('trigger.positive')
+      ? true
+      : caseId.startsWith('trigger.negative')
+        ? false
+        : undefined
+
+  const attempt = (
+    caseId: string,
+    verdict: Attempt['verdict'],
+    triggered: boolean | null,
+  ): Attempt => ({
+    index: 0,
+    caseId,
+    startedAt: '',
+    finishedAt: '',
+    trigger:
+      triggered === null
+        ? { available: false, reason: 'unreadable' }
+        : {
+            available: true,
+            triggered,
+            skills: [],
+            refused: false,
+            refusals: [],
+            complete: true,
+            via: 'test',
+          },
+    assertions: [],
+    verdict,
+    reason: '',
+  })
+
+  const refused = (caseId: string): Attempt => ({
+    index: 0,
+    caseId,
+    startedAt: '',
+    finishedAt: '',
+    trigger: {
+      available: true,
+      triggered: false,
+      skills: [],
+      refused: true,
+      refusals: [{ skill: 'docx', reason: 'the host denied permission' }],
+      complete: true,
+      via: 'test',
+    },
+    assertions: [],
+    verdict: 'unknown',
+    reason: '',
+  })
+
+  it('reddedilen pozitifler precision üretmez — N=0', () => {
+    const summary = summarize(
+      [
+        refused('trigger.positive.a'),
+        refused('trigger.positive.b'),
+        refused('trigger.positive.c'),
+        refused('trigger.positive.d'),
+      ],
+      expected,
+    )
+    expect(summary.trigger.truePositive).toBe(0)
+    expect(summary.trigger.unknown).toBe(4)
+    expect(summary.trigger.precision.n).toBe(0)
+    expect(summary.trigger.precision.rate).toBeNull()
+  })
+
+  it('reddedilen negatif "tetiklenmedi" sayılmaz', () => {
+    const summary = summarize([refused('trigger.negative.a')], expected)
+    expect(summary.trigger.trueNegative).toBe(0)
+    expect(summary.trigger.unknown).toBe(1)
+  })
+
+  it('reddedilen negatif ayrım gücü ölçüsüne de girmez', () => {
+    const summary = summarize(
+      [attempt('trigger.positive.a', 'pass', true), refused('trigger.negative.b')],
+      expected,
+    )
+    expect(summary.discrimination.attempts).toBe(0)
+    expect(summary.discrimination.untested).toBe(false)
+  })
+
+  it('gerçekten aktive olan tetiklenme hâlâ ölçülür', () => {
+    const summary = summarize(
+      [attempt('trigger.positive.a', 'pass', true), refused('trigger.positive.b')],
+      expected,
+    )
+    expect(summary.trigger.truePositive).toBe(1)
+    expect(summary.trigger.precision.n).toBe(1)
+  })
+})
+
+/**
+ * 0.4.0 — çakışma matrisi.
+ *
+ * Satır beklenen kazanan, sütun ilk tetiklenen; ölçülemeyen deneme matrise
+ * girmez. Buradaki koşum elle kurulmuş bir kayıt: matrisin yalnızca kayıttan
+ * kurulabildiği iddiası tam olarak bu.
+ */
+describe('collisionMatrix (0.4.0)', () => {
+  const attempt = (
+    skills: string[],
+    opts: { available?: boolean; complete?: boolean; checkUnknown?: boolean } = {},
+  ): Attempt => ({
+    index: 0,
+    caseId: 'c',
+    startedAt: '2026-09-10T00:00:00.000Z',
+    finishedAt: '2026-09-10T00:00:01.000Z',
+    trigger:
+      opts.available === false
+        ? { available: false, reason: 'unreadable' }
+        : {
+            available: true,
+            triggered: false,
+            skills,
+            refused: false,
+            refusals: [],
+            complete: opts.complete ?? true,
+            via: 'test',
+          },
+    ...(opts.checkUnknown === true ? { triggerCheck: { verdict: 'unknown' as const, reason: 'refused' } } : {}),
+    assertions: [],
+    verdict: 'pass',
+    reason: 'test',
+    latencyMs: 1,
+  })
+  const caseOf = (caseId: string, attempts: Attempt[], expectedWinner?: string[]): CaseResult => ({
+    caseId,
+    ...(expectedWinner === undefined ? {} : { expectedWinner }),
+    attempts,
+    passRate: proportion(0, 0),
+    passed: 0,
+    failed: 0,
+    unknown: 0,
+  })
+  const runOf = (cases: CaseResult[]): Run => ({
+    id: 'r',
+    startedAt: '2026-09-10T00:00:00.000Z',
+    finishedAt: '2026-09-10T00:01:00.000Z',
+    host: 'test',
+    skill: 'p:target',
+    pins: { skillSource: 's', skillHash: 'h', model: 'm', systemPromptHash: 'x', suiteVersion: 1, suiteHash: 'q' },
+    runs: 3,
+    cases,
+    verdict: 'fail',
+  })
+
+  it('kazanan beklemeyen koşumda matris yok', () => {
+    const run = runOf([caseOf('trigger.positive.a', [attempt(['p:target'])])])
+    expect(collisionMatrix(run)).toBeUndefined()
+    expect(summarizeRun(run).collision).toBeUndefined()
+  })
+
+  it('satirlar beklenen, sutunlar ilk tetiklenen; ayni kazanani bekleyen vakalar birlesir', () => {
+    const run = runOf([
+      caseOf('collide.cro.a', [attempt(['p:cro']), attempt([]), attempt(['p:signup', 'p:cro'])], ['p:cro']),
+      caseOf('collide.cro.b', [attempt(['p:cro'])], ['p:cro']),
+      caseOf('collide.signup.a', [attempt([]), attempt([])], ['p:signup']),
+      caseOf('negative.x', [attempt([]), attempt(['p:pricing'])], []),
+    ])
+    const matrix = collisionMatrix(run)
+    // Sütun sırası: none, köşegen (satır sırasıyla), sonra beklenmeyen gözlenen.
+    expect(matrix?.columns).toEqual(['none', 'p:cro', 'p:signup', 'p:pricing'])
+    expect(matrix?.rows.map((r) => [r.expected, r.cases, r.cells])).toEqual([
+      [['p:cro'], 2, { 'p:cro': 2, none: 1, 'p:signup': 1 }],
+      [['p:signup'], 1, { none: 2 }],
+      [[], 1, { none: 1, 'p:pricing': 1 }],
+    ])
+    // Kazanmak = ilk olmak; signup'tan sonra gelen cro kazanmadı, "also fired".
+    expect(matrix?.rows[0]?.won.successes).toBe(2)
+    expect(matrix?.rows[0]?.won.n).toBe(4)
+    expect(matrix?.rows[0]?.alsoFired).toBe(1)
+    // none satırı: hiçbir şey tetiklenmediğinde kazandı.
+    expect(matrix?.rows[2]?.won.successes).toBe(1)
+    // Değişmez #4: oran N ve aralıkla.
+    expect(matrix?.rows[1]?.won).toMatchObject({ successes: 0, n: 2 })
+    expect(matrix?.rows[1]?.won.ci).not.toBeNull()
+    expect(summarizeRun(run).collision).toEqual(matrix)
+  })
+
+  it('olculemeyen deneme matrise girmez, ayri sayilir — none sutununa dusmez', () => {
+    const run = runOf([
+      caseOf(
+        'collide.cro.a',
+        [
+          attempt(['p:cro']),
+          attempt([], { available: false }),
+          attempt([], { complete: false }),
+          attempt([], { checkUnknown: true }),
+        ],
+        ['p:cro'],
+      ),
+    ])
+    const matrix = collisionMatrix(run)
+    expect(matrix?.rows[0]?.cells).toEqual({ 'p:cro': 1 })
+    expect(matrix?.rows[0]?.unmeasured).toBe(3)
+    expect(matrix?.unmeasured).toBe(3)
+    expect(matrix?.rows[0]?.won.n).toBe(1)
+  })
+
+  it('collisionPrefix: ortak plugin oneki; biri oneksizse yok', () => {
+    const matrix = collisionMatrix(
+      runOf([caseOf('c.a', [attempt(['p:cro'])], ['p:cro']), caseOf('c.b', [attempt([])], ['p:signup'])]),
+    )
+    expect(matrix === undefined ? '' : collisionPrefix(matrix)).toBe('p:')
+    // Öneki atmak `p:cro` ile öneksiz `cro`yu çakıştırırdı: önek atılmaz.
+    const clash = collisionMatrix(runOf([caseOf('c.a', [attempt(['cro'])], ['p:cro'])]))
+    expect(clash === undefined ? 'x' : collisionPrefix(clash)).toBe('')
+    // Öneksiz ama çakışmayan bir ad (host'la gelen `run`) öneki engellemez,
+    // ve ayrıca söylenir. Gerçek kayıtta ilk hâli 300 karakterlik satır üretti.
+    const host = collisionMatrix(runOf([caseOf('c.a', [attempt(['run'])], ['p:cro'])]))
+    expect(host === undefined ? '' : collisionPrefix(host)).toBe('p:')
+    expect(host === undefined ? [] : outsidePrefix(host, 'p:')).toEqual(['run'])
   })
 })

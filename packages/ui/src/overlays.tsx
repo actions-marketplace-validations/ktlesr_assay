@@ -21,14 +21,21 @@ import { IconClose } from './icons'
  * zeminden gölgeyle değil, hairline ve daha koyu/açık bir yüzeyle ayrılıyor.
  */
 
-const OVERLAY =
-  'fixed inset-0 bg-surface-sunken/70 data-[state=open]:animate-[fade_150ms_ease-out]'
+/*
+ * Katmanlar `z-50`: `main` kendi yığın bağlamını kuruyor (z-index 1, arka plan
+ * alanının üstünde kalmak için) ve başlık 20'de. Portal içeriği z-index'siz
+ * kaldığında sayfanın ALTINDA çiziliyordu — onay penceresinin metni arkadaki
+ * satırların içinden okunuyordu (0.4.1-n). Saydamlık değil, yığın sırası.
+ */
+const LAYER = 'z-50'
+
+const OVERLAY = `${LAYER} fixed inset-0 bg-surface-sunken/70 data-[state=open]:animate-[fade_150ms_ease-out]`
 
 const PANEL =
-  'fixed left-1/2 top-1/2 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 ' +
+  `${LAYER} fixed left-1/2 top-1/2 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 ` +
   'border border-rule-strong bg-surface-raised p-6'
 
-const SURFACE = 'border border-rule bg-surface-raised p-1'
+const SURFACE = `${LAYER} border border-rule bg-surface-raised p-1`
 
 // ---------------------------------------------------------------------------
 // Dialog
@@ -139,7 +146,7 @@ export function Tooltip({ label, children }: { label: string; children: ReactNod
       <RadixTooltip.Portal>
         <RadixTooltip.Content
           sideOffset={6}
-          className="border border-rule-strong bg-surface-raised px-2 py-1 text-xs text-text"
+          className={`${LAYER} border border-rule-strong bg-surface-raised px-2 py-1 text-xs text-text`}
         >
           {label}
         </RadixTooltip.Content>
@@ -161,7 +168,7 @@ export function Popover({
       <RadixPopover.Portal>
         <RadixPopover.Content
           sideOffset={6}
-          className="w-72 border border-rule-strong bg-surface-raised p-4 text-sm"
+          className={`${LAYER} w-72 border border-rule-strong bg-surface-raised p-4 text-sm`}
         >
           {children}
         </RadixPopover.Content>

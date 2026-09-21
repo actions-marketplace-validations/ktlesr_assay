@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { comparePins, formatProportion, proportion, type Pins } from './records.js'
+import {
+  assayVersionLabel,
+  comparePins,
+  formatProportion,
+  proportion,
+  type Pins,
+} from './records.js'
+
+describe('assayVersionLabel — 0.3.2', () => {
+  it('surum varsa onu veriyor', () => {
+    expect(assayVersionLabel({ assayVersion: '0.3.2' })).toBe('0.3.2')
+  })
+
+  it('surum yoksa bos degil, damgadan once yazildigini soyluyor', () => {
+    // Alan 0.3.2'de geldi: 0.3.1'in kendi kayıtları da alansız, o yüzden
+    // "0.3.1 öncesi" değil "0.3.1 ya da öncesi".
+    const label = assayVersionLabel({})
+    expect(label).toContain('0.3.1 or earlier')
+    expect(label).toContain('predates version stamping')
+  })
+
+  it('bos string de surum sayilmiyor', () => {
+    expect(assayVersionLabel({ assayVersion: '  ' })).toContain('0.3.1 or earlier')
+  })
+})
 
 describe('proportion — değişmez #4', () => {
   it('gözlem yoksa oran da aralık da null', () => {
@@ -107,11 +131,38 @@ describe('comparePins — değişmez #2', () => {
       expect(result.unavailable).toEqual([])
     })
 
-    it('ortam hash degeri kaymissa pin 3 kaymis sayilir', () => {
+    /**
+     * 0.3.0-a: kayan alan kendi adıyla raporlanır.
+     *
+     * Bu testin eski hâli `drifted: ['systemPromptHash']` bekliyordu, yani
+     * kusuru kodluyordu. Gerçek bir koşumda görüldü: iki kayıtta da
+     * `systemPromptHash` `not-provided-by-host` iken çapraz izin modu
+     * karşılaştırması "systemPromptHash changed" dedi. Karar doğruydu
+     * (karşılaştırma durmalı), gerekçe yanlış adres veriyordu — kullanıcı hiç
+     * kımıldamamış bir sistem promptunu aramaya gönderiliyordu.
+     */
+    it('ortam hash kayarsa kayan alan environmentHash olarak raporlanir', () => {
       const a: Pins = { ...blind, environmentHash: 'sha256:env-a' }
       const b: Pins = { ...blind, environmentHash: 'sha256:env-b' }
       const result = comparePins(a, b)
       expect(result.comparable).toBe(false)
+      expect(result.drifted).toEqual(['environmentHash'])
+    })
+
+    it('ortam hash kayinca systemPromptHash hicbir listede anilmaz', () => {
+      const a: Pins = { ...blind, environmentHash: 'sha256:env-a' }
+      const b: Pins = { ...blind, environmentHash: 'sha256:env-b' }
+      const result = comparePins(a, b)
+      // Denetçi zaten "koşullar değişti" dedi; denetlenen pini ayrıca
+      // "ölçülemedi" diye saymak aynı olayı iki kez ve iki farklı adla
+      // raporlamak olur.
+      expect(result.drifted).not.toContain('systemPromptHash')
+      expect(result.unavailable).not.toContain('systemPromptHash')
+    })
+
+    it('host gercekten sistem promptu hash i veriyorsa o kayar', () => {
+      const seeing: Pins = { ...base, systemPromptHash: 'sha256:sp-a' }
+      const result = comparePins(seeing, { ...seeing, systemPromptHash: 'sha256:sp-b' })
       expect(result.drifted).toEqual(['systemPromptHash'])
     })
 
