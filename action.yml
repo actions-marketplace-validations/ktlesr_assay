@@ -144,7 +144,20 @@ runs:
           npm install -g "@ktlsr/assay@${ASSAY_VERSION}"
         fi
         npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-        claude --version || true
+        # npm 12'den itibaren bağımlılık install script'leri varsayılan olarak
+        # koşmuyor ve host'un yerel ikilisi tam da bir postinstall'dan geliyor
+        # (install.cjs). Kurulum yine "added 1 package" deyip başarıyla bitiyor,
+        # yani atlandığı ancak ilk denemede ve "unknown" olarak görülürdü.
+        # Ölçüldü: npm 12.1.0 ile script engelleniyor ve `claude` "native binary
+        # not installed" veriyor.
+        if ! claude --version >/dev/null 2>&1; then
+          echo "the host binary is missing; running its install script directly"
+          node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs" || true
+        fi
+        if ! claude --version; then
+          echo "::error::The Claude Code binary did not install. npm 12 blocks install scripts by default (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/); allow them for @anthropic-ai/claude-code or pin npm < 12."
+          exit 1
+        fi
 
     - name: Fetch baseline
       if: inputs.baseline == 'true'

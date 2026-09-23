@@ -23,7 +23,13 @@ ARG PLAYWRIGHT_VERSION=1.63.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git python3 ca-certificates curl procps \
  && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
+# Doğrulama derleme adımında: npm 12'den itibaren install script'leri varsayılan
+# olarak koşmuyor ve host'un ikilisi bir postinstall'dan geliyor. Atlanırsa kurulum
+# yine başarılı görünür, hata ancak ilk denemede `unknown` olarak çıkardı.
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && { claude --version >/dev/null 2>&1 || node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"; } \
+ && claude --version \
+ && npm cache clean --force
 # Tarayıcının sistem kütüphaneleri root ister; tarayıcının kendisi aşağıda.
 RUN npx -y playwright@${PLAYWRIGHT_VERSION} install-deps chromium \
  && rm -rf /root/.npm /var/lib/apt/lists/*
