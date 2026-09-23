@@ -3353,3 +3353,34 @@ ana makinedeki geliştirme sunucusuna (`host.docker.internal:3100`) ulaşabildi 
 ağın kapattığı şey ölçülmüş oldu.
 Geri dönüş maliyeti: düşük (yeni bayraklar ve opsiyonel kayıt alanı; varsayılan
 davranış ve dizüstü kayıtlarının hash'i değişmedi)
+
+## 2026-09-23 — Host kurulumu doğrulanıyor: npm 12 install script'lerini engelliyor
+
+Bağlam: npm'in 2026-07-08 duyurusu üç kurulum varsayılanını kapattı — bağımlılık
+install script'leri, git bağımlılıkları ve uzak URL bağımlılıkları. Ölçüldü
+(npm 12.1.0, yerel): `npm install @anthropic-ai/claude-code` "added 2 packages"
+diyor, `postinstall: node install.cjs` engelleniyor ve `claude --version`
+"native binary not installed" veriyor. Host'u npm ile kuran iki yerimiz var:
+eylem (`action.yml`) ve deneme imajı (`tools/runner-env/Dockerfile`). İkisi de
+bugün npm 10/11 ile koşuyor, yani arıza henüz görünmüyor.
+Seçenekler: (a) beklemek · (b) `--allow-scripts @anthropic-ai/claude-code`
+bayrağını eklemek · (c) kurulumdan sonra ikiliyi doğrulamak, gerekirse
+`install.cjs`i elle koşturmak, hâlâ yoksa durmak
+Karar: (c), iki yerde de. Eylemdeki `claude --version || true` satırı da kalktı.
+Gerekçe: (a) arızayı sessiz bırakıyor — kurulum başarılı görünüyor, host
+açılmıyor ve her deneme `unknown` oluyor; kullanıcı kırık bir skill arar, oysa
+sorun kurulumda. (b) npm 12'ye özel: eski npm'ler bayrağı tanımıyor ve eylem
+her runner'da koşuyor; sürüme bağlı bir bayrak, sürümü bilmediğimiz bir yerde
+kurulumu kırardı. (c) her npm sürümünde aynı şeyi yapıyor ve arızayı
+görünür kılıyor: imajda derleme düşüyor, eylemde adım `::error::` ile duruyor.
+Yayın tarafı etkilenmiyor: dört paketimizde install script'i yok, bağımlılıkları
+(ajv, yaml, zod) da script taşımıyor, git/uzak URL bağımlılığı yok — yani npm 12
+altında kurulumumuz değişmiyor. Duyurunun asıl konusu olan 2FA-bypass
+token'larının kullanımdan kalkması da hattımızı kesmiyor: yayın OIDC ile
+(0.4.5 zaten npm 12.0.2 ile yayımlandı). Depoda duran kullanılmayan `NPM_TOKEN`
+secret'ı ayrı bir konu ve kullanıcıya bildirildi.
+Doğrulama: üç ters çevirme (eylemde onarım satırı, eylemde doğrulama, imajda
+doğrulama) `tools/host-install-guard.test.ts`te kırmızı; eylemin kabuk bloğu
+`bash -n` ile sınandı; imaj yeniden derlendi ve derleme adımı `2.1.270 (Claude
+Code)` bastı.
+Geri dönüş maliyeti: düşük (iki dosyada birkaç satır)

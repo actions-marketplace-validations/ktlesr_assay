@@ -414,9 +414,10 @@ node tools/runner-env/verify.mjs
 | Taban | `node:22.20.0-bookworm-slim`, **özetle pinli** (etiket Debian güncellemeleriyle yeniden derleniyor) |
 | İçerik | Claude Code 2.1.270, `@ktlsr/assay` 0.4.5, Playwright 1.63.0'ın Chromium'u (`chromium-1243` + `chromium_headless_shell-1243`, 658 MB), git 2.39, Python 3.11, curl, procps. Sürümler `ARG`, varsayılanları pinli |
 | Kullanıcı | `node`, uid 1000. HOME'da yalnızca `.cache/ms-playwright`; kabuk başlangıç dosyaları silindi |
+| Host denetimi | `claude --version` derleme adımında koşuyor: npm 12 install script'lerini varsayılan olarak engelliyor ve host'un ikilisi bir `postinstall`dan geliyor. Engellenirse imaj derlenmiyor |
 | Talimat denetimi | `assay-check-instructions` derleme adımında koşuyor; bütün dosya sisteminde `CLAUDE.md`, `CLAUDE.local.md`, `.claude`, `/etc/claude-code` arıyor. İmajda boş |
 | Boyut | `assay-attempt` 2,28 GB, `assay-egress` 326 MB (açılmış) |
-| Özet (bu makinede) | `assay-attempt` `sha256:630415ad…c1515`, `assay-egress` `sha256:a648732d…c1a0` |
+| Özet (bu makinede) | `assay-attempt` `sha256:65c39ca0…bb3c5`. Her yeniden derlemede değişir; kayda giren değer koşum anındaki özet (K2) |
 
 **Tarayıcı neden HOME'da.** Adaptörün ortam allowlist'i `PLAYWRIGHT_BROWSERS_PATH`'i
 ajana geçirmiyor, bu yüzden tarayıcı Playwright'ın varsayılan yolunda. Plan "boş
