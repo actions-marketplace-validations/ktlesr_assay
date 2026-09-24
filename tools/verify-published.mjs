@@ -57,8 +57,12 @@ let missing = 0
  * Bu yüzden yokluk hemen hata sayılmıyor, birkaç kez artan aralıklarla
  * soruluyor. Sürüm YANLIŞ geldiğinde beklenmiyor: o bir yayılma gecikmesi
  * değil, gerçekten farklı bir cevap.
+ *
+ * 0.4.6'da pencere (toplam 41 sn) yine yetmedi: `@ktlsr/assay` en son
+ * yayımlanan paket ve en geç görünen o; 41. saniyede hâlâ yoktu, birkaç dakika
+ * sonra `npm view` gösterdi. Pencere toplam ~2 dakikaya uzatıldı.
  */
-const ATTEMPTS = [0, 3000, 6000, 12000, 20000]
+const ATTEMPTS = [0, 3000, 6000, 12000, 20000, 30000, 45000]
 
 const lookUp = (spec) => {
   try {

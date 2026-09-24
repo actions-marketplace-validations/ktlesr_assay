@@ -3384,3 +3384,35 @@ doğrulama) `tools/host-install-guard.test.ts`te kırmızı; eylemin kabuk bloğ
 `bash -n` ile sınandı; imaj yeniden derlendi ve derleme adımı `2.1.270 (Claude
 Code)` bastı.
 Geri dönüş maliyeti: düşük (iki dosyada birkaç satır)
+
+## 2026-09-24 — 0.4.6 yayımlandı; eylem v1.3.6; `NPM_TOKEN` secret'ı silindi
+
+Kullanıcının onayıyla (tetik kullanıcıdan):
+- Yayın koşumu `35961131110`, `7b43191` üzerinde. Paketler gitti ama iş kırmızı:
+  son adım `verify-published.mjs` `@ktlsr/assay@0.4.6`yı 41 sn'lik pencerede
+  göremedi (`core` 21 sn'de, `runner` 10 sn'de göründü). Kısmi yayın değil,
+  yayılma gecikmesi: dört paket sonradan registry'den okundu — `latest=0.4.6`,
+  `_npmVersion` 12.1.0 (OIDC), dördünde SLSA provenance — ve temiz dizinde
+  `npm i @ktlsr/assay@0.4.6` sonrası `assay --version` 0.4.6 bastı.
+- `action-v1.3.6` (açıklamalı) `7b43191`'de açıldı, GitHub Release "Latest";
+  `v1` açık onayla `d3146fb`'den `7b43191`'e zorla taşındı. `v1`'deki
+  `action.yml` pini API'den okundu: 0.4.6. Eylem host ikilisini kurulumdan
+  sonra doğruluyor (2026-09-23 kaydı). Dış depo doğrulaması yapılmadı.
+- Kullanılmayan `NPM_TOKEN` depo secret'ı silindi (`gh secret list` boş).
+  npmjs.com'daki token'ın iptali kullanıcıda.
+
+## 2026-09-24 — Yayın doğrulamasının bekleme penceresi ~2 dakikaya uzatıldı
+
+Bağlam: 0.1.2'de aynı yanlış alarm için pencere `0/3/6/12/20` sn (toplam 41 sn)
+yapılmıştı. 0.4.6'da yetmedi; en geç görünen yine en son yayımlanan
+`@ktlsr/assay`.
+Seçenekler: pencereyi uzatmak · yokluğu uyarıya indirmek · paket başına değil
+toplam süreye göre beklemek
+Karar: `0/3/6/12/20/30/45` sn (toplam 116 sn). Yokluk hâlâ hata.
+Gerekçe: Uyarıya indirmek gerçek bir kısmi yayını da sarı yapardı — doğrulamanın
+varlık sebebi o. Bekleme yalnızca yokken ödeniyor; görünen paket için maliyet
+sıfır. Pencere yine aşılırsa iş kırmızı kalır ve elle `npm view` ile ayrılır;
+bu yanlış alarm, sessiz bir eksik yayından ucuz.
+Changeset eklenmedi: araç yayımlanan paketlerin parçası değil, kullanıcıya
+görünen bir değişiklik yok. Değişiklik main'de; 0.4.7 yayını onunla koşar.
+Geri dönüş maliyeti: düşük
