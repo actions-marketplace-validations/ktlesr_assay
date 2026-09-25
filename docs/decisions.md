@@ -3397,7 +3397,12 @@ Kullanıcının onayıyla (tetik kullanıcıdan):
 - `action-v1.3.6` (açıklamalı) `7b43191`'de açıldı, GitHub Release "Latest";
   `v1` açık onayla `d3146fb`'den `7b43191`'e zorla taşındı. `v1`'deki
   `action.yml` pini API'den okundu: 0.4.6. Eylem host ikilisini kurulumdan
-  sonra doğruluyor (2026-09-23 kaydı). Dış depo doğrulaması yapılmadı.
+  sonra doğruluyor (2026-09-23 kaydı).
+- Dış depo doğrulaması: `ktlesr/assay-example`'da `@v1` ile koşum `35985570527`,
+  yeşil. Eylem `ktlesr/assay@v1`'i `7b43191` olarak indirdi, `assay-version: 0.4.6`
+  kurdu; host kurulum doğrulaması geçti (`2.1.281 (Claude Code)`), `##[warning]`
+  yok. Artefakttaki kayıt (`run-2026-09-24T10-09-39-836Z-309d82d9`)
+  `assayVersion: "0.4.6"`, `pass`, 3 vaka, 6 deneme, `environment.memory: []`.
 - Kullanılmayan `NPM_TOKEN` depo secret'ı silindi (`gh secret list` boş).
   npmjs.com'daki token'ın iptali kullanıcıda.
 
